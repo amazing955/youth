@@ -1,0 +1,8 @@
+{
+  "appId": "org.kihandecou.youthsavings",
+  "appName": "Youth Savings",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}
