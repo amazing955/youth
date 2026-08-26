@@ -9,6 +9,10 @@ import { SaccoApp } from './App.jsx'
 import AdminApp from './AdminApp.jsx'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
 
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'))
+}
+
 function ProtectedRoute() {
   const { isAuthenticated } = useAuth()
   return isAuthenticated ? <SaccoApp /> : <Navigate to="/" replace />
