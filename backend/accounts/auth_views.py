@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .auth_serializers import LoginSerializer, RegisterSerializer
+from .throttles import LoginRateThrottle, PasswordResetRateThrottle, RegistrationRateThrottle
 
 User = get_user_model()
 
@@ -22,6 +23,7 @@ def user_payload(user):
 class LoginView(APIView):
     authentication_classes = []
     permission_classes = []
+    throttle_classes = [LoginRateThrottle]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -33,6 +35,7 @@ class LoginView(APIView):
 class RegisterView(APIView):
     authentication_classes = []
     permission_classes = []
+    throttle_classes = [RegistrationRateThrottle]
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -44,6 +47,7 @@ class RegisterView(APIView):
 class ResetPasswordView(APIView):
     authentication_classes = []
     permission_classes = []
+    throttle_classes = [PasswordResetRateThrottle]
 
     def post(self, request):
         try:

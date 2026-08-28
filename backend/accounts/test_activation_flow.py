@@ -4,6 +4,7 @@ from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.core.management import call_command
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -101,6 +102,15 @@ class ActivationFlowTests(TestCase):
 
         serializer = LoginSerializer(data={'username': 'newmember', 'password': 'Secret123'})
         self.assertTrue(serializer.is_valid())
+
+    def test_login_is_throttled_after_repeated_attempts(self):
+        cache.clear()
+        client = APIClient()
+        for attempt in range(5):
+            response = client.post('/api/auth/login/', {'username': 'unknown', 'password': 'wrong-password'}, format='json', REMOTE_ADDR='198.51.100.42')
+            self.assertEqual(response.status_code, 400, f'Attempt {attempt + 1} should be handled as an invalid login.')
+        response = client.post('/api/auth/login/', {'username': 'unknown', 'password': 'wrong-password'}, format='json', REMOTE_ADDR='198.51.100.42')
+        self.assertEqual(response.status_code, 429)
 
     def test_loan_repayment_updates_outstanding_balance(self):
         member = Member.objects.create(

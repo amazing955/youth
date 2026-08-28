@@ -29,6 +29,13 @@ function money(value) {
   return `UGX ${Number(value || 0).toLocaleString("en-UG")}`;
 }
 
+function timeGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
 function AdminToolsContent() {
   const [settings, setSettings] = useState(null);
   const [audit, setAudit] = useState([]);
@@ -418,7 +425,7 @@ export default function AdminApp() {
         <div className="admin-welcome">
           <div>
             <span className="eyebrow">Operations overview</span>
-            <h1>Good morning, {user.full_name.split(" ")[0]}</h1>
+            <h1>{timeGreeting()}, {user.full_name.split(" ")[0]}</h1>
             <p>Monitor members, payments, and SACCO activity.</p>
           </div>
           <span className="admin-avatar">
