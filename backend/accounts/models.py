@@ -32,6 +32,7 @@ class SACCOSettings(models.Model):
     loan_interest_rate = models.DecimalField(max_digits=5, decimal_places=2, default=10)
     mtn_number = models.CharField(max_length=30)
     airtel_number = models.CharField(max_length=30)
+    whatsapp_group_link = models.URLField(blank=True, default='')
     mtn_ussd_template = models.CharField(max_length=255, default='*165*1*{SACCO_NUMBER}*{AMOUNT}#')
     airtel_ussd_template = models.CharField(max_length=255, default='*185*1*{SACCO_NUMBER}*{AMOUNT}#')
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
@@ -71,6 +72,18 @@ class Notice(models.Model):
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='created_notices')
     created_at = models.DateTimeField(auto_now_add=True)
     is_read = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class Notification(models.Model):
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name='notifications')
+    title = models.CharField(max_length=180)
+    message = models.TextField()
+    kind = models.CharField(max_length=30, default='General')
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']

@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import './index.css'
 import './App.css'
-import { LoginPage, RegisterPage, WelcomePage } from './AuthPages.jsx'
+import { LoginPage, RegisterPage, ResetPasswordPage, WelcomePage } from './AuthPages.jsx'
 import { SaccoApp } from './App.jsx'
 import AdminApp from './AdminApp.jsx'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
@@ -32,6 +32,7 @@ createRoot(document.getElementById('root')).render(
           <Route path="/" element={<WelcomePage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/app" element={<ProtectedRoute />} />
           <Route path="/admin" element={<AdminRoute />} />
           <Route path="*" element={<Navigate to="/" replace />} />

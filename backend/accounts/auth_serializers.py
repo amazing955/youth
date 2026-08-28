@@ -13,7 +13,7 @@ class LoginSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         user = authenticate(username=attrs['username'], password=attrs['password'])
-        if not user or not user.is_active or not getattr(getattr(user, 'member_profile', None), 'is_active', True):
+        if not user or not user.is_active:
             raise serializers.ValidationError('Invalid username or password.')
         attrs['user'] = user
         return attrs
@@ -67,5 +67,5 @@ class RegisterSerializer(serializers.Serializer):
             last_name=validated_data.pop('last_name'),
             password=password,
         )
-        Member.objects.create(user=user, full_name=user.get_full_name(), email=user.email, **validated_data)
+        Member.objects.create(user=user, full_name=user.get_full_name(), email=user.email, is_active=False, **validated_data)
         return user

@@ -70,6 +70,9 @@ export function changePassword(payload) {
   return request('/auth/change-password/', { method: 'POST', body: JSON.stringify(payload) })
 }
 
+export function resetPassword(payload) { return request('/auth/reset-password/', { method: 'POST', body: JSON.stringify(payload) }) }
+export function adminPasswordReset(memberId) { return request(`/admin/members/${memberId}/password-reset/`, { method: 'POST', body: JSON.stringify({}) }) }
+
 export function getPaymentConfig() {
   return request('/payment-config/')
 }
@@ -90,6 +93,8 @@ export function getAdminMembers(search = '') {
   return request(`/admin/members/${search ? `?search=${encodeURIComponent(search)}` : ''}`)
 }
 
+export function getAdminMember(memberId) { return request(`/admin/members/${memberId}/`) }
+
 export function getAdminLoans() {
   return request('/loans/')
 }
@@ -103,6 +108,8 @@ export function adminLoanAction(loanId, action, reason = '') {
 }
 
 export function getNotices() { return request('/notices/') }
+export function getNotifications() { return request('/notifications/') }
+export function markNotificationRead(notificationId) { return request(`/notifications/${notificationId}/read/`, { method: 'PATCH', body: JSON.stringify({}) }) }
 export function getAdminNotices() { return request('/admin/notices/') }
 export function createAdminNotice(payload) { return request('/admin/notices/', { method: 'POST', body: JSON.stringify(payload) }) }
 export function generateLoanNotices(kind) { return request('/admin/loan-notices/generate/', { method: 'POST', body: JSON.stringify({ kind }) }) }

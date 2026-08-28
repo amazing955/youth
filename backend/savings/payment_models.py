@@ -8,6 +8,11 @@ class Payment(models.Model):
         MTN = 'MTN', 'MTN Mobile Money'
         AIRTEL = 'Airtel', 'Airtel Money'
 
+    class Purpose(models.TextChoices):
+        SAVINGS = 'savings', 'Savings'
+        ACCOUNT_ACTIVATION = 'account_activation', 'Account activation'
+        LOAN_REPAYMENT = 'loan_repayment', 'Loan repayment'
+
     class Status(models.TextChoices):
         PENDING = 'Pending', 'Pending'
         VERIFIED = 'Verified', 'Verified'
@@ -21,6 +26,7 @@ class Payment(models.Model):
         ADMIN = 'Admin verification', 'Admin verification'
 
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name='payments')
+    purpose = models.CharField(max_length=30, choices=Purpose.choices, default=Purpose.SAVINGS)
     provider = models.CharField(max_length=20, choices=Provider.choices)
     transaction_id = models.CharField(max_length=100, null=True, blank=True)
     internal_reference = models.CharField(max_length=32, unique=True)

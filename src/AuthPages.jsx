@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ArrowLeft, ArrowRight, CheckCircle2, ShieldCheck } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { resetPassword } from './services/api'
 import { useAuth } from './context/AuthContext'
 
 function AuthShell({ children, eyebrow, title, subtitle }) {
@@ -25,6 +26,21 @@ export function LoginPage() {
     try { const result = await login(form); navigate(result.user.role === 'admin' ? '/admin' : '/app') } catch { setError('Invalid username or password.') }
   }
   return <AuthShell eyebrow="Welcome back" title="Login" subtitle="Access your Youth Savings account."><form className="auth-form" onSubmit={submit}>{error && <p className="form-error">{error}</p>}<label>Username<input required value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label><label>Password<input required type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label><button className="auth-primary" disabled={loading} type="submit">{loading ? 'Logging in...' : 'Login'} <ArrowRight size={18} /></button></form></AuthShell>
+}
+
+export function ResetPasswordPage() {
+  const [params] = useSearchParams()
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const navigate = useNavigate()
+  async function submit(event) {
+    event.preventDefault(); setError(''); setMessage('')
+    if (password !== confirmPassword) { setError('Passwords do not match.'); return }
+    try { const result = await resetPassword({ uid: params.get('uid'), token: params.get('token'), password }); setMessage(result.message) } catch { setError('This reset link is invalid, expired, or the password is too weak.') }
+  }
+  return <AuthShell eyebrow="Account security" title="Reset password" subtitle="Create a new password for your Youth Saving account."><form className="auth-form" onSubmit={submit}>{message && <p className="profile-success">{message}</p>}{error && <p className="form-error">{error}</p>}<label>New password<input required type="password" minLength="8" value={password} onChange={(event) => setPassword(event.target.value)} /></label><label>Confirm password<input required type="password" minLength="8" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label><button className="auth-primary" type="submit">Reset password</button>{message && <button className="auth-secondary" type="button" onClick={() => navigate('/login')}>Go to login</button>}</form></AuthShell>
 }
 
 const initialForm = { first_name: '', last_name: '', username: '', email: '', phone_number: '', date_of_birth: '', gender: '', password: '', confirm_password: '', nin: '', address: '', next_of_kin_name: '', next_of_kin_phone: '' }

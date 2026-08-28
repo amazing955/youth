@@ -12,7 +12,7 @@ class MemberAdmin(admin.ModelAdmin):
 
 @admin.register(SACCOSettings)
 class SACCOSettingsAdmin(admin.ModelAdmin):
-    list_display = ['sacco_name', 'loan_interest_rate', 'mtn_number', 'airtel_number', 'updated_by', 'updated_at']
+    list_display = ['sacco_name', 'loan_interest_rate', 'mtn_number', 'airtel_number', 'whatsapp_group_link', 'updated_by', 'updated_at']
     search_fields = ['sacco_name', 'mtn_number', 'airtel_number']
     ordering = ['-updated_at']
 

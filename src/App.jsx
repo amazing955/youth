@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   ArrowDownLeft,
@@ -16,22 +16,27 @@ import {
   PiggyBank,
   Plus,
   Receipt,
-  Send,
   Settings as SettingsIcon,
   ShieldCheck,
+  Target,
   UserRound,
   X,
 } from 'lucide-react'
 import './App.css'
-import { applyForLoan, cancelLoan, changePassword, getDashboard, getLoanTerms, getLoans, getNotices, getPaymentConfig, getProfile, getTransactions, startPayment, updateProfile, uploadProfilePicture } from './services/api'
+import { applyForLoan, cancelLoan, changePassword, getDashboard, getLoanTerms, getLoans, getNotifications, getPaymentConfig, getProfile, getTransactions, markNotificationRead, startPayment, updateProfile, uploadProfilePicture } from './services/api'
 import { useAuth } from './context/AuthContext'
 
 const quickActions = [
   { label: 'Save Money', icon: PiggyBank },
   { label: 'Apply for Loan', icon: CreditCard },
-  { label: 'Send Money', icon: Send },
+  { label: 'Set Goal', icon: Target },
   { label: 'View Statement', icon: Receipt },
 ]
+
+function resolveQuickActionLabel(hasActiveLoan, label) {
+  if (label === 'Apply for Loan' && hasActiveLoan) return 'Repay Loan'
+  return label
+}
 
 const ease = [0.22, 1, 0.36, 1]
 
@@ -48,35 +53,51 @@ function normalizeTransaction(transaction) {
   return { ...transaction, type: transaction.description || transaction.transaction_type, date: formatDate(transaction.created_at), amount: `${amount >= 0 ? '+' : '-'}${formatCurrency(Math.abs(amount))}`, incoming: amount >= 0 }
 }
 
-function AppHeader({ member, onProfile }) {
+function AppHeader({ member, onProfile, notifications, onNotificationRead, onNotificationSelect, whatsappGroupLink }) {
   const firstName = member?.full_name?.split(' ')[0] || 'Member'
   const initials = member?.full_name?.split(' ').map((name) => name[0]).join('').slice(0, 2) || 'M'
+  const [open, setOpen] = useState(false)
+  const unreadCount = notifications.filter((notification) => !notification.is_read).length
+  function selectNotification(notification) {
+    onNotificationSelect(notification)
+    onNotificationRead(notification)
+    setOpen(false)
+  }
   return (
     <header className="app-header">
       <div>
         <p className="greeting">Good morning, {firstName} <span aria-hidden="true">👋</span></p>
         <p className="welcome">Welcome back to your SACCO</p>
       </div>
-      <button className="profile-button" type="button" onClick={onProfile} aria-label="Open profile settings">{member?.profile_picture ? <img src={member.profile_picture} alt="" /> : initials}</button>
+      <div className="header-actions"><button className={`whatsapp-button ${whatsappGroupLink ? '' : 'not-configured'}`} type="button" onClick={() => whatsappGroupLink ? window.open(whatsappGroupLink, '_blank', 'noopener,noreferrer') : window.alert('The SACCO WhatsApp group link has not been configured by the admin yet.')} aria-label="Join the SACCO WhatsApp group" title="Join SACCO WhatsApp group"><span>WA</span></button><div className="notification-wrap"><button className="icon-button notification-button" type="button" onClick={() => setOpen(!open)} aria-label="Open notifications"><Bell size={19} />{unreadCount > 0 && <span className="notification-count">{unreadCount > 9 ? '9+' : unreadCount}</span>}</button>{open && <div className="notification-panel"><div className="notification-panel-head"><strong>Notifications</strong><span>{unreadCount ? `${unreadCount} unread` : 'All caught up'}</span></div>{notifications.length ? notifications.slice(0, 6).map((notification) => <button className={`notification-item ${notification.is_read ? 'read' : ''}`} type="button" key={notification.id} onClick={() => selectNotification(notification)}><strong>{notification.title}</strong><span>{notification.message}</span><small>{new Date(notification.created_at).toLocaleString('en-UG')}</small></button>) : <p className="empty-state">No notifications yet.</p>}</div>}</div><button className="profile-button" type="button" onClick={onProfile} aria-label="Open profile settings">{member?.profile_picture ? <img src={member.profile_picture} alt="" /> : initials}</button></div>
     </header>
   )
 }
 
-function SummaryCard({ dashboard, onSave }) {
+function SummaryCard({ dashboard, onSave, onActivate }) {
+  const inactive = dashboard.member?.is_active === false
   return (
     <motion.section className="summary-card" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55, ease }}>
-      <div className="summary-top"><span>Current Savings</span><span className="summary-badge"><PiggyBank size={14} /> Active</span></div>
+      <div className="summary-top"><span>Current Savings</span><span className={`summary-badge ${inactive ? 'inactive' : ''}`}><PiggyBank size={14} /> {inactive ? 'Activate' : 'Active'}</span></div>
       <strong>{formatCurrency(dashboard.current_savings)}</strong>
       <div className="summary-bottom"><span>Current savings balance</span><ArrowUpRight size={16} /></div>
       <div className="summary-divider" />
       <div className="loan-row"><div><span>Loan Balance</span><strong>{formatCurrency(dashboard.loan_balance)}</strong></div><div className="loan-progress"><span>Active loan</span><div><i /></div></div></div>
-      <button className="save-button" type="button" onClick={onSave}><Plus size={18} /> Save Money</button>
+      {inactive ? <button className="activate-button" type="button" onClick={onActivate}>Activate account</button> : <button className="save-button" type="button" onClick={onSave}><Plus size={18} /> Save Money</button>}
     </motion.section>
   )
 }
 
-function QuickActions({ onSave, onViewStatement, onApplyLoan, pendingLoan }) {
-  return <section className="quick-section"><div className="section-heading"><h2>Quick actions</h2><span>Manage your money</span></div><div className="quick-grid">{quickActions.map(({ label, icon: Icon }) => <button className="quick-action" type="button" key={label} onClick={label === 'Save Money' ? onSave : label === 'View Statement' ? onViewStatement : label === 'Apply for Loan' ? onApplyLoan : undefined}><span className="quick-icon"><Icon size={19} /></span><span>{label === 'Apply for Loan' && pendingLoan ? 'Pending' : label}</span></button>)}</div></section>
+function QuickActions({ onSave, onSetGoal, onViewStatement, onApplyLoan, pendingLoan, hasActiveLoan }) {
+  return <section className="quick-section"><div className="section-heading"><h2>Quick actions</h2><span>Manage your money</span></div><div className="quick-grid">{quickActions.map(({ label, icon: Icon }) => {
+    const actionLabel = resolveQuickActionLabel(hasActiveLoan, label)
+    return <button className="quick-action" type="button" key={label} onClick={label === 'Save Money' ? onSave : label === 'Set Goal' ? onSetGoal : label === 'View Statement' ? onViewStatement : label === 'Apply for Loan' ? onApplyLoan : undefined}><span className="quick-icon"><Icon size={19} /></span><span>{label === 'Apply for Loan' && pendingLoan ? 'Pending' : actionLabel}</span></button>
+  })}</div></section>
+}
+
+function GoalList({ goals }) {
+  if (!goals.length) return null
+  return <section className="goals-section"><div className="section-heading"><h2>Financial goals</h2><span>{goals.length} saved</span></div><div className="goal-list">{goals.map((goal) => <article className="goal-item" key={goal.id}><span className="goal-icon"><Target size={17} /></span><div><strong>{goal.name}</strong><small>Target amount</small></div><b>{formatCurrency(goal.amount)}</b></article>)}</div></section>
 }
 
 function RecentActivity({ transactions, onViewAll }) {
@@ -87,14 +108,18 @@ function TransactionRow({ transaction, detailed = false }) {
   return <div className={`transaction-row ${detailed ? 'detailed' : ''}`}><span className={`transaction-icon ${transaction.incoming ? 'incoming' : 'outgoing'}`}>{transaction.incoming ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}</span><div className="transaction-info"><strong>{transaction.type}</strong><span>{transaction.date}</span></div><div className="transaction-amount"><strong className={transaction.incoming ? 'positive' : 'negative'}>{transaction.amount}</strong>{detailed ? <span className="transaction-status"><Check size={11} /> {transaction.status}</span> : <span>{transaction.status}</span>}</div></div>
 }
 
-function NoticeList({ notices }) {
-  if (!notices.length) return null
-  return <section className="notice-list-section"><div className="section-heading"><h2>Notices</h2><span>From your SACCO</span></div><div className="notice-list">{notices.slice(0, 3).map((notice) => <article className="notice-item" key={notice.id}><span className="notice-kind">{notice.kind}</span><strong>{notice.title}</strong><p>{notice.message}</p></article>)}</div></section>
+function NoticeList({ selectedNotification, onClose }) {
+  const noticeRef = useRef(null)
+  useEffect(() => {
+    if (selectedNotification) noticeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [selectedNotification])
+  if (!selectedNotification) return null
+  return <section className="notice-list-section selected-notification-section" ref={noticeRef}><div className="section-heading"><h2>Selected notification</h2><button className="see-all" type="button" onClick={onClose}>Close</button></div><article className="notice-item"><span className="notice-kind">{selectedNotification.kind}</span><strong>{selectedNotification.title}</strong><p>{selectedNotification.message}</p><small className="notification-full-date">{new Date(selectedNotification.created_at).toLocaleString('en-UG')}</small></article></section>
 }
 
-function HomeScreen({ dashboard, notices, onSave, onViewAll, onViewStatement, onApplyLoan, pendingLoan }) {
+function HomeScreen({ dashboard, notifications, onNotificationRead, onNotificationSelect, selectedNotification, onCloseNotification, whatsappGroupLink, goals, onSetGoal, onSave, onActivate, onViewAll, onViewStatement, onApplyLoan, pendingLoan, hasActiveLoan }) {
   const reduceMotion = useReducedMotion()
-  return <motion.div className="screen home-screen" initial={reduceMotion ? false : { opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={reduceMotion ? undefined : { opacity: 0, x: -10 }} transition={{ duration: 0.3, ease }}><AppHeader member={dashboard.member} onProfile={() => {}} /><SummaryCard dashboard={dashboard} onSave={onSave} /><QuickActions onSave={onSave} onViewStatement={onViewStatement} onApplyLoan={onApplyLoan} pendingLoan={pendingLoan} /><RecentActivity transactions={dashboard.recent_transactions} onViewAll={onViewAll} /><NoticeList notices={notices} /><div className="security-note"><ShieldCheck size={16} /><span>Your savings are protected and secure</span></div></motion.div>
+  return <motion.div className="screen home-screen" initial={reduceMotion ? false : { opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={reduceMotion ? undefined : { opacity: 0, x: -10 }} transition={{ duration: 0.3, ease }}><AppHeader member={dashboard.member} notifications={notifications} onNotificationRead={onNotificationRead} onNotificationSelect={onNotificationSelect} whatsappGroupLink={whatsappGroupLink} onProfile={() => {}} /><SummaryCard dashboard={dashboard} onSave={onSave} onActivate={onActivate} /><QuickActions onSave={onSave} onSetGoal={onSetGoal} onViewStatement={onViewStatement} onApplyLoan={onApplyLoan} pendingLoan={pendingLoan} hasActiveLoan={hasActiveLoan} /><GoalList goals={goals} /><RecentActivity transactions={dashboard.recent_transactions} onViewAll={onViewAll} /><NoticeList selectedNotification={selectedNotification} onClose={onCloseNotification} /><div className="security-note"><ShieldCheck size={16} /><span>Your savings are protected and secure</span></div></motion.div>
 }
 
 function TransactionsScreen({ transactions, loading, error, report = false }) {
@@ -136,6 +161,25 @@ function PasswordSheet({ onClose }) {
   return <motion.div className="sheet-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}><motion.form className="save-sheet password-sheet" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ duration: 0.4, ease }} onClick={(event) => event.stopPropagation()} onSubmit={submit}><div className="sheet-handle" /><div className="sheet-header"><div><span className="eyebrow">Account security</span><h2>Change Password</h2></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close password form"><X size={19} /></button></div>{[['current_password', 'Current password'], ['new_password', 'New password'], ['confirm_password', 'Confirm new password']].map(([name, label]) => <label className="password-field" key={name}>{label}<input required type="password" value={form[name]} onChange={(event) => setForm({ ...form, [name]: event.target.value })} /></label>)}{message && <p className="profile-success">{message}</p>}{error && <p className="profile-error">{error}</p>}<button className="button button-primary continue-button" type="submit">Change Password</button><button className="cancel-button" type="button" onClick={onClose}>Cancel</button></motion.form></motion.div>
 }
 
+function GoalSheet({ onClose, onGoalCreated }) {
+  const [name, setName] = useState('')
+  const [amount, setAmount] = useState('')
+  const [error, setError] = useState('')
+
+  function submit(event) {
+    event.preventDefault()
+    const value = Number(amount)
+    if (!name.trim() || !value || value <= 0) {
+      setError('Enter an item name and a target amount greater than zero.')
+      return
+    }
+    onGoalCreated({ id: Date.now(), name: name.trim(), amount: value })
+    onClose()
+  }
+
+  return <motion.div className="sheet-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}><motion.form className="save-sheet goal-sheet" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ duration: 0.4, ease }} onClick={(event) => event.stopPropagation()} onSubmit={submit}><div className="sheet-handle" /><div className="sheet-header"><div><span className="eyebrow">Plan ahead</span><h2>Set a financial goal</h2><p className="sheet-subtitle">Choose an item and set the amount you want to reach.</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close financial goal form"><X size={19} /></button></div><label className="goal-field">Item name<input required placeholder="For example, school fees" value={name} onChange={(event) => setName(event.target.value)} /></label><label className="goal-field">Target amount<div className="amount-input"><span>UGX</span><input required type="number" min="1" step="1000" placeholder="Enter amount" value={amount} onChange={(event) => setAmount(event.target.value)} /></div></label>{error && <p className="profile-error">{error}</p>}<button className="button button-primary continue-button" type="submit">Save goal</button><button className="cancel-button" type="button" onClick={onClose}>Cancel</button></motion.form></motion.div>
+}
+
 function LoanSheet({ onClose, pendingLoan, onLoanCreated, onLoanCancelled }) {
   const [amount, setAmount] = useState('')
   const [terms, setTerms] = useState(null)
@@ -151,24 +195,28 @@ function LoanSheet({ onClose, pendingLoan, onLoanCreated, onLoanCancelled }) {
   return <motion.div className="sheet-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}><motion.form className="save-sheet loan-sheet" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ duration: 0.4, ease }} onClick={(event) => event.stopPropagation()} onSubmit={submit}><div className="sheet-handle" /><div className="sheet-header"><div><span className="eyebrow">Credit request</span><h2>{pendingLoan ? 'Loan request' : 'Apply for a loan'}</h2><p className="sheet-subtitle">{pendingLoan ? 'Your application is being processed by the SACCO.' : 'Your savings determine your eligible amount.'}</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close loan application"><X size={19} /></button></div>{pendingLoan ? <><div className="pending-loan-card"><span>Status<strong>Pending</strong></span><span>Requested amount<strong>UGX {Number(pendingLoan.loan_amount).toLocaleString('en-UG')}</strong></span><span>Interest<strong>{pendingLoan.interest_rate}%</strong></span></div><p className="selected-method">Your loan request is being reviewed. You can cancel it while it is still pending.</p>{error && <p className="profile-error">{error}</p>}<button className="cancel-loan-button" type="button" onClick={cancelPending}>Cancel loan request</button></> : terms ? <><div className="loan-eligibility"><span>Current savings<strong>UGX {Number(terms.current_savings).toLocaleString('en-UG')}</strong></span><span>Maximum loan<strong>UGX {maximum.toLocaleString('en-UG')}</strong></span></div><label className="sheet-amount-label" htmlFor="loan-amount">Loan amount</label><div className={`amount-input ${amountError ? 'input-error' : ''}`}><span>UGX</span><input id="loan-amount" type="number" min="1" max={maximum} placeholder="Enter amount" value={amount} onChange={(event) => setAmount(event.target.value)} /></div>{amountError && <p className="loan-validation">{amountError} Keep at least UGX 20,000 in savings.</p>}<div className="loan-interest"><span>Interest rate</span><strong>{terms.interest_rate}%</strong><small>Estimated interest: UGX {Math.round(interest).toLocaleString('en-UG')}</small></div>{message && <p className="profile-success">{message}</p>}{error && <p className="profile-error">{error}</p>}<button className="button button-primary continue-button" type="submit" disabled={!amount || Boolean(amountError) || Boolean(message)}>Submit application</button></> : <p className="empty-state">Loading loan terms...</p>}<button className="cancel-button" type="button" onClick={onClose}>Close</button></motion.form></motion.div>
 }
 
-function SaveSheet({ onClose }) {
+function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false, maxRepaymentAmount = 0 }) {
   const [selectedMethod, setSelectedMethod] = useState('')
-  const [amount, setAmount] = useState('')
-  const [config, setConfig] = useState(null)
+  const [amount, setAmount] = useState(activationMode ? '10000' : '')
   const [startError, setStartError] = useState('')
   const paymentMethods = [['MTN Mobile Money', 'MTN', 'mtn'], ['Airtel Money', 'airtel', 'airtel']]
-  useEffect(() => { getPaymentConfig().then(setConfig).catch(() => setStartError('Unable to load SACCO payment settings.')) }, [])
+
+  const amountLimit = loanRepaymentMode ? Number(maxRepaymentAmount || 0) : 0
+  const amountError = loanRepaymentMode && amount && Number(amount) > amountLimit ? `Repayment cannot exceed UGX ${amountLimit.toLocaleString('en-UG')}.` : ''
+
   async function beginPayment() {
     setStartError('')
     try {
       const provider = selectedMethod.startsWith('MTN') ? 'MTN' : 'Airtel'
-      const result = await startPayment({ provider, amount })
+      const paymentAmount = activationMode ? '10000' : amount
+      const purpose = activationMode ? 'account_activation' : loanRepaymentMode ? 'loan_repayment' : 'savings'
+      const result = await startPayment({ provider, amount: paymentAmount, purpose })
       window.location.href = result.ussd_uri
     } catch { setStartError('Unable to start this payment. Please try again.') }
   }
-  return <motion.div className="sheet-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}><motion.div className="save-sheet" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ duration: 0.4, ease }} onClick={(event) => event.stopPropagation()}><div className="sheet-handle" /><div className="sheet-header"><div><span className="eyebrow">Save securely</span><h2>Choose Payment Method</h2><p className="sheet-subtitle">Select your mobile money provider to continue</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close payment method selection"><X size={19} /></button></div><div className="payment-options">{paymentMethods.map(([label, logo, className]) => <button className={`payment-option ${selectedMethod === label ? 'selected' : ''}`} type="button" key={label} onClick={() => setSelectedMethod(label)}><span className={`provider-logo ${className}`}>{logo}</span><span className="payment-label">{label}</span><span className="selection-indicator">{selectedMethod === label ? <Check size={15} /> : null}</span></button>)}</div>{selectedMethod && <><p className="selected-method" role="status">Selected payment method: <strong>{selectedMethod}</strong></p><label className="sheet-amount-label" htmlFor="payment-amount">Amount to save</label><div className="amount-input"><span>UGX</span><input id="payment-amount" type="number" min="1" placeholder="Enter amount" value={amount} onChange={(event) => setAmount(event.target.value)} /></div><p className="sacco-number">Send to: {config ? (selectedMethod.startsWith('MTN') ? config.mtn_number : config.airtel_number) : 'Loading SACCO number...'}</p><button className="button button-primary continue-button" type="button" disabled={!amount || !config} onClick={beginPayment}>Open mobile money <ArrowUpRight size={17} /></button></>}{startError && <p className="sheet-error">{startError}</p>}<button className="cancel-button" type="button" onClick={onClose}>Cancel</button></motion.div></motion.div>
-}
 
+  return <motion.div className="sheet-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}><motion.div className="save-sheet" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ duration: 0.4, ease }} onClick={(event) => event.stopPropagation()}><div className="sheet-handle" /><div className="sheet-header"><div><span className="eyebrow">{activationMode ? 'Account activation' : loanRepaymentMode ? 'Loan repayment' : 'Save securely'}</span><h2>{activationMode ? 'Activate your account' : loanRepaymentMode ? 'Repay your loan' : 'Choose Payment Method'}</h2><p className="sheet-subtitle">{activationMode ? 'Pay UGX 10,000 once to activate your account. This does not count as savings.' : loanRepaymentMode ? 'Pay part or all of your outstanding loan balance using mobile money.' : 'Select your mobile money provider to continue'}</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close payment method selection"><X size={19} /></button></div><div className="payment-options">{paymentMethods.map(([label, logo, className]) => <button className={`payment-option ${selectedMethod === label ? 'selected' : ''}`} type="button" key={label} onClick={() => setSelectedMethod(label)}><span className={`provider-logo ${className}`}>{logo}</span><span className="payment-label">{label}</span><span className="selection-indicator">{selectedMethod === label ? <Check size={15} /> : null}</span></button>)}</div>{selectedMethod && <><p className="selected-method" role="status">{activationMode ? 'Activation fee: ' : loanRepaymentMode ? 'Outstanding balance: ' : 'Selected payment method: '}<strong>{activationMode ? 'UGX 10,000' : loanRepaymentMode ? `UGX ${amountLimit.toLocaleString('en-UG')}` : selectedMethod}</strong>{activationMode ? '. This amount is only for account activation and is not added to your savings.' : loanRepaymentMode ? '. You may pay part or all of this balance.' : ''}</p>{activationMode && <p className="selected-method activation-note">You are about to pay UGX 10,000 to activate your account. This fee is not part of your regular savings.</p>}<label className="sheet-amount-label" htmlFor="payment-amount">{activationMode ? 'Activation fee' : loanRepaymentMode ? 'Repayment amount' : 'Amount to save'}</label><div className="amount-input"><span>UGX</span><input id="payment-amount" type="number" min={activationMode ? '10000' : '1'} step="1000" max={loanRepaymentMode ? amountLimit : undefined} placeholder={loanRepaymentMode ? 'Enter repayment amount' : activationMode ? '10000' : '0'} value={amount} onChange={(event) => setAmount(event.target.value)} /></div>{loanRepaymentMode && amountError && <p className="loan-validation">{amountError}</p>}{activationMode ? <p className="selected-method activation-note">This is a one-time activation fee and not part of your savings.</p> : loanRepaymentMode ? <p className="selected-method">You can pay part of or your full loan balance.</p> : <p className="selected-method">Save securely into your SACCO account.</p>}<button className="button button-primary continue-button" type="button" onClick={beginPayment} disabled={!selectedMethod || !amount || Number(amount) <= 0 || Boolean(amountError)}>Continue</button>{startError && <p className="profile-error">{startError}</p>}</>}{!selectedMethod && <p className="selected-method">Choose a payment method to continue.</p>}<button className="cancel-button" type="button" onClick={onClose}>Cancel</button></motion.div></motion.div>
+}
 function BottomNav({ activeTab, setActiveTab }) {
   const tabs = [['home', HomeIcon, 'Home'], ['transactions', ArrowLeftRight, 'Transactions'], ['settings', SettingsIcon, 'Settings']]
   return <nav className="bottom-nav" aria-label="Main navigation">{tabs.map(([id, Icon, label]) => <button className={activeTab === id ? 'active' : ''} type="button" onClick={() => setActiveTab(id)} key={id}><span className="nav-icon"><Icon size={20} /></span><span>{label}</span></button>)}</nav>
@@ -185,18 +233,27 @@ export function SaccoApp() {
   const [settingsView, setSettingsView] = useState('settings')
   const [passwordOpen, setPasswordOpen] = useState(false)
   const [loanOpen, setLoanOpen] = useState(false)
+  const [activationOpen, setActivationOpen] = useState(false)
+  const [loanRepaymentOpen, setLoanRepaymentOpen] = useState(false)
   const [loans, setLoans] = useState([])
-  const [notices, setNotices] = useState([])
+  const [notifications, setNotifications] = useState([])
+  const [whatsappGroupLink, setWhatsappGroupLink] = useState('')
+  const [selectedNotification, setSelectedNotification] = useState(null)
+  const [goalOpen, setGoalOpen] = useState(false)
+  const [goals, setGoals] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('sacco_financial_goals') || '[]') } catch { return [] }
+  })
   const [statementMode, setStatementMode] = useState(false)
   useEffect(() => {
     let mounted = true
-    Promise.all([getDashboard(), getTransactions(), getLoans(), getNotices()])
-      .then(([dashboardData, transactionData, loanData, noticeData]) => {
+    Promise.all([getDashboard(), getTransactions(), getLoans(), getNotifications(), getPaymentConfig()])
+      .then(([dashboardData, transactionData, loanData, notificationData, paymentConfig]) => {
         if (!mounted) return
         setDashboard(dashboardData)
         setTransactions(transactionData.results || transactionData)
         setLoans(loanData.results || loanData)
-        setNotices(noticeData)
+        setNotifications(notificationData.notifications || [])
+        setWhatsappGroupLink(paymentConfig.whatsapp_group_link || '')
       })
       .catch(() => {
         if (mounted) setTransactionError(true)
@@ -205,9 +262,39 @@ export function SaccoApp() {
     return () => { mounted = false }
   }, [user])
 
+  async function handleNotificationRead(notification) {
+    if (!notification.is_read) {
+      await markNotificationRead(notification.id)
+      setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, is_read: true } : item))
+    }
+  }
+
+  function handleGoalCreated(goal) {
+    setGoals((items) => {
+      const updated = [...items, goal]
+      localStorage.setItem('sacco_financial_goals', JSON.stringify(updated))
+      return updated
+    })
+  }
+
   const settingsScreen = dashboard && (settingsView === 'profile' ? <ProfileScreen onBack={() => setSettingsView('settings')} /> : <SettingsScreen member={dashboard.member} onLogout={logout} onProfile={() => setSettingsView('profile')} onPassword={() => setPasswordOpen(true)} />)
   const pendingLoan = loans.find((loan) => loan.status === 'Pending')
-  const screens = dashboard ? { home: <HomeScreen dashboard={dashboard} notices={notices} onSave={() => setSheetOpen(true)} onApplyLoan={() => setLoanOpen(true)} pendingLoan={pendingLoan} onViewAll={() => { setStatementMode(false); setActiveTab('transactions') }} onViewStatement={() => { setStatementMode(true); setActiveTab('transactions') }} />, transactions: <TransactionsScreen transactions={transactions} loading={loading} error={transactionError} report={statementMode} />, settings: settingsScreen } : null
-    return <div className="app-frame"><div className="app-status"><span>● ● ▰</span></div><main className="app-content"><AnimatePresence mode="wait">{loading && !dashboard ? <p className="app-loading">Loading your SACCO information...</p> : transactionError && !dashboard ? <p className="app-error">Unable to load your SACCO information. Please try again.</p> : screens?.[activeTab]}</AnimatePresence></main><BottomNav activeTab={activeTab} setActiveTab={(tab) => { setActiveTab(tab); if (tab === 'settings') setSettingsView('settings'); if (tab === 'transactions') setStatementMode(false) }} /><AnimatePresence>{sheetOpen && <SaveSheet onClose={() => setSheetOpen(false)} />}{passwordOpen && <PasswordSheet onClose={() => setPasswordOpen(false)} />}{loanOpen && <LoanSheet pendingLoan={pendingLoan} onLoanCreated={(loan) => setLoans((items) => [...items, loan])} onLoanCancelled={() => setLoans((items) => items.filter((loan) => loan.id !== pendingLoan?.id))} onClose={() => setLoanOpen(false)} />}</AnimatePresence></div>
-}
+  const activeLoan = loans.find((loan) => loan.status === 'Approved' || loan.status === 'Active')
+  const hasActiveLoan = Boolean(activeLoan)
+  const handleAccountActivation = () => {
+    window.alert('You are required to pay UGX 10,000 to activate your account.')
+    setActivationOpen(true)
+  }
 
+  const handleLoanAction = () => {
+    if (hasActiveLoan) {
+      window.alert('You are repaying your current loan. Choose the amount you want to pay and continue using mobile money.')
+      setLoanRepaymentOpen(true)
+      return
+    }
+    setLoanOpen(true)
+  }
+
+  const screens = dashboard ? { home: <HomeScreen dashboard={dashboard} notifications={notifications} onNotificationRead={handleNotificationRead} onNotificationSelect={setSelectedNotification} selectedNotification={selectedNotification} onCloseNotification={() => setSelectedNotification(null)} whatsappGroupLink={whatsappGroupLink} goals={goals} onSetGoal={() => setGoalOpen(true)} onSave={() => setSheetOpen(true)} onActivate={handleAccountActivation} onApplyLoan={handleLoanAction} pendingLoan={pendingLoan} hasActiveLoan={hasActiveLoan} onViewAll={() => { setStatementMode(false); setActiveTab('transactions') }} onViewStatement={() => { setStatementMode(true); setActiveTab('transactions') }} />, transactions: <TransactionsScreen transactions={transactions} loading={loading} error={transactionError} report={statementMode} />, settings: settingsScreen } : null
+  return <div className="app-frame"><div className="app-status"><span>● ● ▰</span></div><main className="app-content"><AnimatePresence mode="wait">{loading && !dashboard ? <p className="app-loading">Loading your SACCO information...</p> : transactionError && !dashboard ? <p className="app-error">Unable to load your SACCO information. Please try again.</p> : screens?.[activeTab]}</AnimatePresence></main><BottomNav activeTab={activeTab} setActiveTab={(tab) => { setActiveTab(tab); if (tab === 'settings') setSettingsView('settings'); if (tab === 'transactions') setStatementMode(false) }} /><AnimatePresence>{sheetOpen && <SaveSheet onClose={() => setSheetOpen(false)} />}{activationOpen && <SaveSheet activationMode onClose={() => setActivationOpen(false)} />}{loanRepaymentOpen && <SaveSheet loanRepaymentMode maxRepaymentAmount={Number(activeLoan?.outstanding_balance || 0)} onClose={() => setLoanRepaymentOpen(false)} />}{goalOpen && <GoalSheet onClose={() => setGoalOpen(false)} onGoalCreated={handleGoalCreated} />}{passwordOpen && <PasswordSheet onClose={() => setPasswordOpen(false)} />}{loanOpen && <LoanSheet pendingLoan={pendingLoan} onLoanCreated={(loan) => setLoans((items) => [...items, loan])} onLoanCancelled={() => setLoans((items) => items.filter((loan) => loan.id !== pendingLoan?.id))} onClose={() => setLoanOpen(false)} />}</AnimatePresence></div>
+}

@@ -63,10 +63,58 @@ class AdminMembersView(APIView):
 
     def get(self, request):
         query = request.query_params.get('search', '')
-        members = Member.objects.all().select_related('user')
+        members = Member.objects.all().select_related('user').prefetch_related('savings', 'loans')
         if query:
             members = members.filter(Q(full_name__icontains=query) | Q(email__icontains=query) | Q(phone_number__icontains=query) | Q(nin__icontains=query))
-        return Response([{'id': member.id, 'full_name': member.full_name, 'username': member.user.username if member.user else '', 'phone_number': member.phone_number, 'email': member.email, 'is_active': member.is_active} for member in members])
+        return Response([admin_member_data(member) for member in members])
+
+
+def admin_member_data(member):
+    active_loans = [loan for loan in member.loans.all() if loan.status in [Loan.Status.PENDING, Loan.Status.APPROVED, Loan.Status.ACTIVE]]
+    return {
+        'id': member.id,
+        'full_name': member.full_name,
+        'username': member.user.username if member.user else '',
+        'phone_number': member.phone_number,
+        'email': member.email,
+        'is_active': member.is_active,
+        'savings_balance': sum((saving.amount for saving in member.savings.all()), 0),
+        'loan_balance': sum((loan.outstanding_balance for loan in active_loans), 0),
+        'loan_count': len(active_loans),
+    }
+
+
+class AdminMemberDetailView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, member_id):
+        try:
+            member = Member.objects.select_related('user').prefetch_related('savings', 'loans').get(pk=member_id)
+        except Member.DoesNotExist:
+            return Response({'detail': 'Member not found.'}, status=404)
+        active_loans = [loan for loan in member.loans.all() if loan.status in [Loan.Status.PENDING, Loan.Status.APPROVED, Loan.Status.ACTIVE]]
+        return Response({
+            **admin_member_data(member),
+            'profile_image': request.build_absolute_uri(member.profile_image.url) if member.profile_image else None,
+            'date_of_birth': member.date_of_birth,
+            'gender': member.gender,
+            'nin': member.nin,
+            'address': member.address,
+            'next_of_kin_name': member.next_of_kin_name,
+            'next_of_kin_phone': member.next_of_kin_phone,
+            'date_joined': member.date_joined,
+            'loans': [{
+                'id': loan.id,
+                'loan_amount': loan.loan_amount,
+                'amount_paid': loan.amount_paid,
+                'outstanding_balance': loan.outstanding_balance,
+                'status': loan.status,
+                'created_at': loan.created_at,
+                'approved_at': loan.approved_at,
+                'rejection_reason': loan.rejection_reason,
+            } for loan in member.loans.all()],
+            'active_loan_count': len(active_loans),
+        })
 
 
 class AdminLoanActionView(APIView):
@@ -105,4 +153,4 @@ class PaymentConfigView(APIView):
 
     def get(self, request):
         settings = SACCOSettings.current()
-        return Response({'sacco_name': settings.sacco_name, 'loan_interest_rate': settings.loan_interest_rate, 'mtn_number': settings.mtn_number, 'airtel_number': settings.airtel_number, 'mtn_ussd_template': settings.mtn_ussd_template, 'airtel_ussd_template': settings.airtel_ussd_template})
+        return Response({'sacco_name': settings.sacco_name, 'loan_interest_rate': settings.loan_interest_rate, 'mtn_number': settings.mtn_number, 'airtel_number': settings.airtel_number, 'whatsapp_group_link': settings.whatsapp_group_link, 'mtn_ussd_template': settings.mtn_ussd_template, 'airtel_ussd_template': settings.airtel_ussd_template})
