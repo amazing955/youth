@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { useNavigate } from 'react-router-dom'
 import {
   ArrowDownLeft,
   ArrowLeftRight,
@@ -24,7 +25,7 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
-import { applyForLoan, cancelLoan, changePassword, getDashboard, getLoanTerms, getLoans, getNotifications, getPaymentConfig, getProfile, getTransactions, markNotificationRead, startPayment, updateProfile, uploadProfilePicture } from './services/api'
+import { applyForLoan, cancelLoan, changePassword, getDashboard, getLoanTerms, getLoans, getNotifications, getPaymentConfig, getProfile, getTransactions, markNotificationRead, reconcilePayment, startPayment, updateProfile, uploadProfilePicture } from './services/api'
 import { useAuth } from './context/AuthContext'
 
 const quickActions = [
@@ -210,10 +211,24 @@ function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false,
   const [phoneNumber, setPhoneNumber] = useState('')
   const [startError, setStartError] = useState('')
   const [fallbackStoreOpen, setFallbackStoreOpen] = useState(false)
+  const [savedPayment, setSavedPayment] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('sacco_saved_payment_details') || 'null')
+    } catch {
+      return null
+    }
+  })
   const paymentMethods = [['PesaPal', 'P', 'pesapal']]
 
   const amountLimit = loanRepaymentMode ? Number(maxRepaymentAmount || 0) : 0
   const amountError = loanRepaymentMode && amount && Number(amount) > amountLimit ? `Repayment cannot exceed UGX ${amountLimit.toLocaleString('en-UG')}.` : ''
+
+  function fillSavedPayment() {
+    if (!savedPayment) return
+    setSelectedMethod(savedPayment.provider || 'PesaPal')
+    if (!activationMode && !loanRepaymentMode) setAmount(String(savedPayment.amount || ''))
+    setPhoneNumber(savedPayment.phone_number || '')
+  }
 
   async function beginPayment() {
     setStartError('')
@@ -226,6 +241,14 @@ function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false,
       if (!redirectTarget) {
         throw new Error('No payment redirect available.')
       }
+      sessionStorage.setItem('sacco_pending_payment', JSON.stringify({
+        provider,
+        purpose,
+        route: purpose,
+        amount: paymentAmount,
+        phone_number: phoneNumber,
+        payment_id: result.payment?.id || null,
+      }))
       window.location.href = redirectTarget
     } catch {
       setFallbackStoreOpen(true)
@@ -287,9 +310,32 @@ function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false,
                   {activationMode ? '. This amount is only for account activation and is not added to your savings.' : loanRepaymentMode ? '. You may pay part or all of this balance.' : ''}
                 </p>
 
-                <label className="sheet-amount-label" htmlFor="payment-phone">
-                  Phone number for PIN confirmation
-                </label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                  <label className="sheet-amount-label" htmlFor="payment-phone" style={{ marginBottom: 0 }}>
+                    Phone number for PIN confirmation
+                  </label>
+                  {savedPayment && (
+                    <button
+                      type="button"
+                      aria-label="Use saved payment details"
+                      title="Use saved payment details"
+                      onClick={fillSavedPayment}
+                      style={{
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '999px',
+                        border: '1px solid rgba(99, 102, 241, 0.25)',
+                        background: 'rgba(99, 102, 241, 0.08)',
+                        color: '#4f46e5',
+                        fontSize: '17px',
+                        lineHeight: 1,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ↻
+                    </button>
+                  )}
+                </div>
                 <div className="amount-input">
                   <span>+ </span>
                   <input
@@ -341,6 +387,86 @@ function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false,
         )}
       </motion.div>
     </motion.div>
+  )
+}
+
+export function PaymentCompletePage() {
+  const navigate = useNavigate()
+  const [status, setStatus] = useState('Processing your payment receipt...')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let active = true
+
+    async function finalizePayment() {
+      const params = new URLSearchParams(window.location.search)
+      const pending = JSON.parse(sessionStorage.getItem('sacco_pending_payment') || 'null') || {}
+      const transactionId = params.get('transaction_id') || params.get('tracking_id') || params.get('merchant_reference') || params.get('reference') || params.get('payment_reference') || pending.payment_id || `receipt-${Date.now()}`
+      const amount = params.get('amount') || pending.amount || '0'
+      const paymentStatus = params.get('status') || params.get('result') || 'COMPLETED'
+      const purpose = params.get('purpose') || params.get('route') || pending.purpose || pending.route || 'savings'
+      const provider = params.get('provider') || pending.provider || 'PesaPal'
+      const phoneNumber = params.get('phone_number') || pending.phone_number || ''
+
+      if (!transactionId || !amount || Number(amount) <= 0) {
+        if (active) {
+          setError('The payment confirmation came back without a valid receipt. Please open the app to check your balance or retry the payment.')
+          setStatus('Payment confirmation incomplete')
+        }
+        return
+      }
+
+      try {
+        const data = await reconcilePayment({
+          provider,
+          transaction_id: transactionId,
+          amount,
+          purpose,
+          route: purpose,
+          status: paymentStatus,
+          payment_time: new Date().toISOString(),
+          phone_number: phoneNumber,
+        })
+        if (active) {
+          if (data?.status === 'Verified' || data?.provider_verified) {
+            localStorage.setItem('sacco_saved_payment_details', JSON.stringify({
+              provider,
+              amount,
+              phone_number: phoneNumber,
+              purpose,
+            }))
+          }
+          setStatus(data?.status === 'Verified' || data?.provider_verified ? 'Payment confirmed and your SACCO balance has been updated.' : 'Payment receipt received. Your balance is being updated.')
+          sessionStorage.removeItem('sacco_pending_payment')
+        }
+      } catch {
+        if (active) {
+          setError('We received the payment receipt, but the system could not confirm it automatically. Please check your account or contact the SACCO admin.')
+          setStatus('Payment confirmation pending')
+        }
+      }
+    }
+
+    finalizePayment()
+    return () => { active = false }
+  }, [])
+
+  return (
+    <div className="payment-complete-screen">
+      <div className="payment-complete-card">
+        <span className="eyebrow">Payment receipt</span>
+        <h1>{error ? 'Confirmation needed' : 'Payment update'}</h1>
+        <p>{error || status}</p>
+        {error ? (
+          <>
+            <button className="button button-primary continue-button" type="button" onClick={() => navigate('/app', { replace: true })}>Back to app</button>
+            <button className="cancel-button" type="button" onClick={() => window.location.reload()}>Retry</button>
+          </>
+        ) : (
+          <button className="button button-primary continue-button" type="button" onClick={() => navigate('/app', { replace: true })}>Return to app</button>
+        )}
+      </div>
+    </div>
   )
 }
 

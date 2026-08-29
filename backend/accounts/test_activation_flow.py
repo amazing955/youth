@@ -139,6 +139,39 @@ class ActivationFlowTests(TestCase):
         self.assertEqual(response.data['payment']['provider'], 'PesaPal')
         self.assertEqual(response.data['payment']['sacco_number'], '+256700000010')
 
+    def test_provider_receipt_verifies_payment_route_and_updates_balances(self):
+        user = User.objects.create_user(username='receiptuser', email='receipt@example.com', password='Secret123')
+        member = Member.objects.create(
+            user=user,
+            full_name='Receipt User',
+            email=user.email,
+            phone_number='+256700000011',
+            is_active=True,
+        )
+        loan = Loan.objects.create(member=member, loan_amount=Decimal('50000'), amount_paid=Decimal('25000'), status=Loan.Status.ACTIVE)
+
+        client = APIClient()
+        client.force_authenticate(user=user)
+        response = client.post('/api/payments/reconcile/', {
+            'provider': 'PesaPal',
+            'transaction_id': 'PESAPAL-RECEIPT-001',
+            'amount': '25000',
+            'purpose': 'loan_repayment',
+            'route': 'loan_repayment',
+            'member_id': member.id,
+            'status': 'COMPLETED',
+            'payment_time': timezone.now().isoformat(),
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        payment = Payment.objects.get(transaction_id='PESAPAL-RECEIPT-001')
+        self.assertEqual(payment.status, Payment.Status.VERIFIED)
+        self.assertEqual(payment.purpose, Payment.Purpose.LOAN_REPAYMENT)
+        self.assertTrue(payment.provider_verified)
+        self.assertEqual(payment.source, Payment.Source.PROVIDER_API)
+        loan.refresh_from_db()
+        self.assertEqual(loan.amount_paid, Decimal('50000'))
+
     def test_loan_repayment_updates_outstanding_balance(self):
         member = Member.objects.create(
             full_name='Repay Member',

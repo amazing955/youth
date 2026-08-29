@@ -14,7 +14,7 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import AuditLog, SACCOSettings
+from accounts.models import AuditLog, Member, SACCOSettings
 from accounts.notification_utils import notify_member
 from loans.models import Loan
 from transactions.models import Transaction
@@ -154,31 +154,145 @@ class PaymentStartView(APIView):
 class ReconcilePaymentView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def _apply_verified_payment(self, payment):
+        payment.status = Payment.Status.VERIFIED
+        payment.provider_verified = True
+        payment.source = Payment.Source.PROVIDER_API
+        payment.verified_by = payment.member.user if payment.member.user else None
+        payment.verified_at = timezone.now()
+        if payment.purpose == Payment.Purpose.ACCOUNT_ACTIVATION:
+            payment.member.is_active = True
+            if payment.member.user:
+                payment.member.user.is_active = True
+                payment.member.user.save(update_fields=['is_active'])
+            payment.member.save(update_fields=['is_active'])
+            Transaction.objects.create(
+                member=payment.member,
+                transaction_type=Transaction.TransactionType.SAVINGS,
+                amount=Decimal('0'),
+                payment_method=payment.provider,
+                description='Account activation fee',
+                reference=payment.internal_reference,
+                status=Transaction.Status.COMPLETED,
+            )
+        elif payment.purpose == Payment.Purpose.LOAN_REPAYMENT:
+            active_loan = payment.member.loans.filter(status__in=[Loan.Status.ACTIVE, Loan.Status.APPROVED]).order_by('-created_at').first()
+            if active_loan:
+                active_loan.amount_paid = active_loan.amount_paid + payment.amount
+                active_loan.save(update_fields=['amount_paid', 'outstanding_balance'])
+            Transaction.objects.create(
+                member=payment.member,
+                transaction_type=Transaction.TransactionType.LOAN_REPAYMENT,
+                amount=payment.amount,
+                payment_method=payment.provider,
+                description='Loan repayment',
+                reference=payment.internal_reference,
+                status=Transaction.Status.COMPLETED,
+            )
+        else:
+            Savings.objects.create(
+                member=payment.member,
+                amount=payment.amount,
+                payment_method='MTN Mobile Money' if payment.provider == Payment.Provider.MTN else 'Airtel Money' if payment.provider == Payment.Provider.AIRTEL else 'PesaPal',
+                transaction_reference=payment.internal_reference,
+            )
+            Transaction.objects.create(
+                member=payment.member,
+                transaction_type=Transaction.TransactionType.SAVINGS,
+                amount=payment.amount,
+                payment_method=payment.provider,
+                description='Savings payment',
+                reference=payment.internal_reference,
+                status=Transaction.Status.COMPLETED,
+            )
+        payment.save(update_fields=['status', 'provider_verified', 'source', 'verified_by', 'verified_at'])
+
     def post(self, request):
-        provider = request.data.get('provider')
+        provider = str(request.data.get('provider', '')).strip()
         transaction_id = str(request.data.get('transaction_id', '')).strip()
+        source_status = str(request.data.get('status', '')).strip().upper()
+        route_name = str(request.data.get('purpose', request.data.get('route', request.data.get('payment_type', Payment.Purpose.SAVINGS)))).strip()
         try:
             amount = Decimal(str(request.data.get('amount', '0')))
-            member = request.user.member_profile
+            member_id = request.data.get('member_id') or getattr(request.user.member_profile, 'id', None)
+            member = Member.objects.filter(id=member_id).select_related('user').first() if member_id else request.user.member_profile
         except (ValueError, TypeError, AttributeError, KeyError):
             return Response({'detail': 'Invalid payment payload.'}, status=400)
         if provider not in Payment.Provider.values or not transaction_id or amount <= 0:
             return Response({'detail': 'Provider, transaction ID, and positive amount are required.'}, status=400)
+        if route_name not in Payment.Purpose.values:
+            route_name = Payment.Purpose.SAVINGS
+
+        success_statuses = {'SUCCESS', 'SUCCESSFUL', 'COMPLETED', 'COMPLETED_SUCCESSFULLY', 'PAID', 'VERIFIED', 'OK'}
+        is_success = bool(request.data.get('successful') in [True, 'true', 'True', '1']) or source_status in success_statuses or source_status.startswith('SUCCESS') or source_status.startswith('COMPLETED')
+        if not is_success:
+            payment = Payment.objects.filter(provider=provider, transaction_id=transaction_id).first()
+            if payment:
+                payment.status = Payment.Status.FAILED
+                payment.provider_verified = False
+                payment.save(update_fields=['status', 'provider_verified'])
+            return Response({'detail': 'Payment receipt indicates the transaction did not complete successfully.'}, status=400)
+
         settings = SACCOSettings.current()
-        sacco_number = request.data.get('sacco_number', '')
-        expected_number = settings.mtn_number if provider == Payment.Provider.MTN else settings.airtel_number
+        sacco_number = str(request.data.get('sacco_number', request.data.get('phone_number', ''))).strip()
+        expected_number = settings.mtn_number if provider == Payment.Provider.MTN else settings.airtel_number if provider == Payment.Provider.AIRTEL else ''
         with transaction.atomic():
-            existing = Payment.objects.select_for_update().filter(provider=provider, transaction_id=transaction_id).first()
-            if existing:
-                AuditLog.objects.create(user=request.user, action='duplicate_payment', object_type='Payment', object_id=str(existing.id), description=f'Payment {transaction_id} marked duplicate.')
-                return Response(PaymentSerializer(existing).data, status=409)
-            if sacco_number != expected_number:
-                payment = Payment.objects.create(member=member, provider=provider, transaction_id=transaction_id, internal_reference=f'YS-{timezone.now():%Y%m%d}-{uuid.uuid4().hex[:8].upper()}', amount=amount, sacco_number=sacco_number, status=Payment.Status.REJECTED, sms_received=True)
+            payment = Payment.objects.select_for_update().filter(provider=provider, transaction_id=transaction_id).first()
+            if payment:
+                if payment.status == Payment.Status.VERIFIED:
+                    return Response(PaymentSerializer(payment).data, status=200)
+                payment.member = member
+                payment.purpose = route_name
+                payment.amount = amount
+                payment.sacco_number = sacco_number or payment.sacco_number
+                payment.payment_time = request.data.get('payment_time') or payment.payment_time
+                payment.source = Payment.Source.PROVIDER_API
+                payment.sms_received = False
+            else:
+                payment = Payment.objects.create(
+                    member=member,
+                    provider=provider,
+                    transaction_id=transaction_id,
+                    purpose=route_name,
+                    internal_reference=f'YS-{timezone.now():%Y%m%d}-{uuid.uuid4().hex[:8].upper()}',
+                    amount=amount,
+                    sacco_number=sacco_number,
+                    status=Payment.Status.PENDING,
+                    source=Payment.Source.PROVIDER_API,
+                    provider_verified=False,
+                    sms_received=False,
+                    payment_time=request.data.get('payment_time') or None,
+                )
+
+            if provider != Payment.Provider.PESAPAL and expected_number and sacco_number and sacco_number != expected_number:
+                payment.status = Payment.Status.REJECTED
+                payment.provider_verified = False
+                payment.save(update_fields=['status', 'provider_verified', 'sacco_number'])
                 notify_member(member, 'Payment rejected', 'Your payment was rejected because the SACCO number did not match the configured account.')
                 return Response({'detail': 'SACCO number does not match configured account.', 'payment': PaymentSerializer(payment).data}, status=400)
-            payment = Payment.objects.create(member=member, provider=provider, transaction_id=transaction_id, internal_reference=f'YS-{timezone.now():%Y%m%d}-{uuid.uuid4().hex[:8].upper()}', amount=amount, sacco_number=sacco_number, status=Payment.Status.PENDING, provider_verified=False, sms_received=True, payment_time=request.data.get('payment_time') or None)
-            notify_member(member, 'Payment received', f'Your payment of UGX {amount:,.0f} was received and is awaiting SACCO verification.')
-            AuditLog.objects.create(user=request.user, action='payment_received', object_type='Payment', object_id=str(payment.id), description=f'Payment {transaction_id} queued for verification.')
+
+            self._apply_verified_payment(payment)
+            notify_member(member, 'Payment received', f'Your {route_name.replace("_", " ")} payment of UGX {amount:,.0f} was confirmed by the payment provider and updated in real time.')
+            admin_users = list(getattr(request.user.__class__, 'objects', None).filter(is_staff=True, is_active=True).exclude(email='').values_list('email', flat=True) if getattr(request.user.__class__, 'objects', None) is not None else [])
+            if admin_users:
+                try:
+                    from django.core.mail import send_mail
+                    send_mail(
+                        'SACCO payment verified',
+                        f'A successful {route_name.replace("_", " ")} payment of UGX {amount:,.0f} for {member.full_name} was confirmed by {provider}.',
+                        settings.DEFAULT_FROM_EMAIL,
+                        admin_users,
+                        fail_silently=True,
+                    )
+                except Exception:
+                    pass
+            AuditLog.objects.create(
+                user=request.user,
+                action='payment_verified',
+                object_type='Payment',
+                object_id=str(payment.id),
+                description=f'Provider receipt for {provider} confirmed payment {transaction_id} for {route_name.replace("_", " ")} amount UGX {amount:,.0f}.',
+            )
         return Response(PaymentSerializer(payment).data, status=201)
 
 

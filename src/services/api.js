@@ -81,6 +81,10 @@ export function startPayment(payload) {
   return request('/payments/start/', { method: 'POST', body: JSON.stringify(payload) })
 }
 
+export function reconcilePayment(payload) {
+  return request('/payments/reconcile/', { method: 'POST', body: JSON.stringify(payload) })
+}
+
 export function getAdminDashboard() {
   return request('/admin/dashboard/')
 }
