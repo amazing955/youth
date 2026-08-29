@@ -153,4 +153,14 @@ class PaymentConfigView(APIView):
 
     def get(self, request):
         settings = SACCOSettings.current()
-        return Response({'sacco_name': settings.sacco_name, 'loan_interest_rate': settings.loan_interest_rate, 'mtn_number': settings.mtn_number, 'airtel_number': settings.airtel_number, 'whatsapp_group_link': settings.whatsapp_group_link, 'mtn_ussd_template': settings.mtn_ussd_template, 'airtel_ussd_template': settings.airtel_ussd_template})
+        return Response({
+            'sacco_name': settings.sacco_name,
+            'loan_interest_rate': settings.loan_interest_rate,
+            'mtn_number': settings.mtn_number,
+            'airtel_number': settings.airtel_number,
+            'whatsapp_group_link': settings.whatsapp_group_link,
+            'mtn_ussd_template': settings.mtn_ussd_template,
+            'airtel_ussd_template': settings.airtel_ussd_template,
+            'pesapal_store_url': getattr(settings, 'pesapal_store_url', None) or getattr(__import__('django.conf').conf.settings, 'PESAPAL_STORE_URL', 'https://store.pesapal.com/youthsacco'),
+            'pesapal_country_code': getattr(__import__('django.conf').conf.settings, 'PESAPAL_COUNTRY_CODE', 'UG'),
+        })

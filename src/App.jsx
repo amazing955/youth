@@ -204,10 +204,13 @@ function LoanSheet({ onClose, pendingLoan, onLoanCreated, onLoanCancelled }) {
 }
 
 function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false, maxRepaymentAmount = 0 }) {
-  const [selectedMethod, setSelectedMethod] = useState('')
+  const FALLBACK_PESAPAL_STORE_URL = 'https://store.pesapal.com/youthsacco'
+  const [selectedMethod, setSelectedMethod] = useState('PesaPal')
   const [amount, setAmount] = useState(activationMode ? '10000' : '')
+  const [phoneNumber, setPhoneNumber] = useState('')
   const [startError, setStartError] = useState('')
-  const paymentMethods = [['MTN Mobile Money', 'MTN', 'mtn'], ['Airtel Money', 'airtel', 'airtel']]
+  const [fallbackStoreOpen, setFallbackStoreOpen] = useState(false)
+  const paymentMethods = [['PesaPal', 'P', 'pesapal']]
 
   const amountLimit = loanRepaymentMode ? Number(maxRepaymentAmount || 0) : 0
   const amountError = loanRepaymentMode && amount && Number(amount) > amountLimit ? `Repayment cannot exceed UGX ${amountLimit.toLocaleString('en-UG')}.` : ''
@@ -215,16 +218,132 @@ function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false,
   async function beginPayment() {
     setStartError('')
     try {
-      const provider = selectedMethod.startsWith('MTN') ? 'MTN' : 'Airtel'
+      const provider = selectedMethod || 'PesaPal'
       const paymentAmount = activationMode ? '10000' : amount
       const purpose = activationMode ? 'account_activation' : loanRepaymentMode ? 'loan_repayment' : 'savings'
-      const result = await startPayment({ provider, amount: paymentAmount, purpose })
-      window.location.href = result.ussd_uri
-    } catch { setStartError('Unable to start this payment. Please try again.') }
+      const result = await startPayment({ provider, amount: paymentAmount, purpose, phone_number: phoneNumber })
+      const redirectTarget = result.redirect_url || result.ussd_uri
+      if (!redirectTarget) {
+        throw new Error('No payment redirect available.')
+      }
+      window.location.href = redirectTarget
+    } catch {
+      setFallbackStoreOpen(true)
+      setStartError('Payment gateway is unavailable. Opening the PesaPal store inside the app.')
+    }
   }
 
-  return <motion.div className="sheet-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}><motion.div className="save-sheet" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ duration: 0.4, ease }} onClick={(event) => event.stopPropagation()}><div className="sheet-handle" /><div className="sheet-header"><div><span className="eyebrow">{activationMode ? 'Account activation' : loanRepaymentMode ? 'Loan repayment' : 'Save securely'}</span><h2>{activationMode ? 'Activate your account' : loanRepaymentMode ? 'Repay your loan' : 'Choose Payment Method'}</h2><p className="sheet-subtitle">{activationMode ? 'Pay UGX 10,000 once to activate your account. This does not count as savings.' : loanRepaymentMode ? 'Pay part or all of your outstanding loan balance using mobile money.' : 'Select your mobile money provider to continue'}</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close payment method selection"><X size={19} /></button></div><div className="payment-options">{paymentMethods.map(([label, logo, className]) => <button className={`payment-option ${selectedMethod === label ? 'selected' : ''}`} type="button" key={label} onClick={() => setSelectedMethod(label)}><span className={`provider-logo ${className}`}>{logo}</span><span className="payment-label">{label}</span><span className="selection-indicator">{selectedMethod === label ? <Check size={15} /> : null}</span></button>)}</div>{selectedMethod && <><p className="selected-method" role="status">{activationMode ? 'Activation fee: ' : loanRepaymentMode ? 'Outstanding balance: ' : 'Selected payment method: '}<strong>{activationMode ? 'UGX 10,000' : loanRepaymentMode ? `UGX ${amountLimit.toLocaleString('en-UG')}` : selectedMethod}</strong>{activationMode ? '. This amount is only for account activation and is not added to your savings.' : loanRepaymentMode ? '. You may pay part or all of this balance.' : ''}</p>{activationMode && <p className="selected-method activation-note">You are about to pay UGX 10,000 to activate your account. This fee is not part of your regular savings.</p>}<label className="sheet-amount-label" htmlFor="payment-amount">{activationMode ? 'Activation fee' : loanRepaymentMode ? 'Repayment amount' : 'Amount to save'}</label><div className="amount-input"><span>UGX</span><input id="payment-amount" type="number" min={activationMode ? '10000' : '1'} step="1000" max={loanRepaymentMode ? amountLimit : undefined} placeholder={loanRepaymentMode ? 'Enter repayment amount' : activationMode ? '10000' : '0'} value={amount} onChange={(event) => setAmount(event.target.value)} /></div>{loanRepaymentMode && amountError && <p className="loan-validation">{amountError}</p>}{activationMode ? <p className="selected-method activation-note">This is a one-time activation fee and not part of your savings.</p> : loanRepaymentMode ? <p className="selected-method">You can pay part of or your full loan balance.</p> : <p className="selected-method">Save securely into your SACCO account.</p>}<button className="button button-primary continue-button" type="button" onClick={beginPayment} disabled={!selectedMethod || !amount || Number(amount) <= 0 || Boolean(amountError)}>Continue</button>{startError && <p className="profile-error">{startError}</p>}</>}{!selectedMethod && <p className="selected-method">Choose a payment method to continue.</p>}<button className="cancel-button" type="button" onClick={onClose}>Cancel</button></motion.div></motion.div>
+  return (
+    <motion.div className="sheet-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
+      <motion.div className="save-sheet" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ duration: 0.4, ease }} onClick={(event) => event.stopPropagation()}>
+        {fallbackStoreOpen ? (
+          <>
+            <div className="sheet-handle" />
+            <div className="sheet-header">
+              <div>
+                <span className="eyebrow">PesaPal store</span>
+                <h2>Continue payment</h2>
+                <p className="sheet-subtitle">The payment gateway is unavailable right now, so we opened the PesaPal store inside the app.</p>
+              </div>
+              <button className="icon-button" type="button" onClick={onClose} aria-label="Close PesaPal store"><X size={19} /></button>
+            </div>
+            <iframe title="PesaPal store" src={FALLBACK_PESAPAL_STORE_URL} className="fallback-store-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+            {startError && <p className="profile-error">{startError}</p>}
+            <button className="cancel-button" type="button" onClick={onClose}>Close</button>
+          </>
+        ) : (
+          <>
+            <div className="sheet-handle" />
+            <div className="sheet-header">
+              <div>
+                <span className="eyebrow">{activationMode ? 'Account activation' : loanRepaymentMode ? 'Loan repayment' : 'Save securely'}</span>
+                <h2>{activationMode ? 'Activate your account' : loanRepaymentMode ? 'Repay your loan' : 'Choose Payment Method'}</h2>
+                <p className="sheet-subtitle">
+                  {activationMode
+                    ? 'Pay UGX 10,000 once to activate your account. This does not count as savings.'
+                    : loanRepaymentMode
+                      ? 'Pay part or all of your outstanding loan balance using PesaPal.'
+                      : 'Pay securely with PesaPal to continue'}
+                </p>
+              </div>
+              <button className="icon-button" type="button" onClick={onClose} aria-label="Close payment method selection"><X size={19} /></button>
+            </div>
+
+            <div className="payment-options">
+              {paymentMethods.map(([label, logo, className]) => (
+                <button className={`payment-option ${selectedMethod === label ? 'selected' : ''}`} type="button" key={label} onClick={() => setSelectedMethod(label)}>
+                  <span className={`provider-logo ${className}`}>{logo}</span>
+                  <span className="payment-label">{label}</span>
+                  <span className="selection-indicator">{selectedMethod === label ? <Check size={15} /> : null}</span>
+                </button>
+              ))}
+            </div>
+
+            {selectedMethod && (
+              <>
+                <p className="selected-method" role="status">
+                  {activationMode ? 'Activation fee: ' : loanRepaymentMode ? 'Outstanding balance: ' : 'Selected payment method: '}
+                  <strong>{activationMode ? 'UGX 10,000' : loanRepaymentMode ? `UGX ${amountLimit.toLocaleString('en-UG')}` : selectedMethod}</strong>
+                  {activationMode ? '. This amount is only for account activation and is not added to your savings.' : loanRepaymentMode ? '. You may pay part or all of this balance.' : ''}
+                </p>
+
+                <label className="sheet-amount-label" htmlFor="payment-phone">
+                  Phone number for PIN confirmation
+                </label>
+                <div className="amount-input">
+                  <span>+ </span>
+                  <input
+                    id="payment-phone"
+                    type="tel"
+                    inputMode="tel"
+                    placeholder="256700000000"
+                    value={phoneNumber}
+                    onChange={(event) => setPhoneNumber(event.target.value.replace(/\D/g, ''))}
+                  />
+                </div>
+
+                <label className="sheet-amount-label" htmlFor="payment-amount">
+                  {activationMode ? 'Activation fee' : loanRepaymentMode ? 'Repayment amount' : 'Amount to save'}
+                </label>
+                <div className="amount-input">
+                  <span>UGX</span>
+                  <input
+                    id="payment-amount"
+                    type="number"
+                    min={activationMode ? '10000' : '1'}
+                    step="1000"
+                    max={loanRepaymentMode ? amountLimit : undefined}
+                    placeholder={loanRepaymentMode ? 'Enter repayment amount' : activationMode ? '10000' : '0'}
+                    value={amount}
+                    onChange={(event) => setAmount(event.target.value)}
+                  />
+                </div>
+
+                {loanRepaymentMode && amountError && <p className="loan-validation">{amountError}</p>}
+                {activationMode ? (
+                  <p className="selected-method activation-note">This is a one-time activation fee and not part of your savings.</p>
+                ) : loanRepaymentMode ? (
+                  <p className="selected-method">You can pay part of or your full loan balance.</p>
+                ) : (
+                  <p className="selected-method">Save securely into your SACCO account.</p>
+                )}
+
+                <button className="button button-primary continue-button" type="button" onClick={beginPayment} disabled={!selectedMethod || !phoneNumber || !amount || Number(amount) <= 0 || Boolean(amountError)}>
+                  Continue
+                </button>
+                {startError && <p className="profile-error">{startError}</p>}
+              </>
+            )}
+
+            {!selectedMethod && <p className="selected-method">Choose a payment method to continue.</p>}
+            <button className="cancel-button" type="button" onClick={onClose}>Cancel</button>
+          </>
+        )}
+      </motion.div>
+    </motion.div>
+  )
 }
+
 function BottomNav({ activeTab, setActiveTab }) {
   const tabs = [['home', HomeIcon, 'Home'], ['transactions', ArrowLeftRight, 'Transactions'], ['settings', SettingsIcon, 'Settings']]
   return <nav className="bottom-nav" aria-label="Main navigation">{tabs.map(([id, Icon, label]) => <button className={activeTab === id ? 'active' : ''} type="button" onClick={() => setActiveTab(id)} key={id}><span className="nav-icon"><Icon size={20} /></span><span>{label}</span></button>)}</nav>
@@ -303,7 +422,7 @@ export function SaccoApp() {
 
   const handleLoanAction = () => {
     if (hasActiveLoan) {
-      window.alert('You are repaying your current loan. Choose the amount you want to pay and continue using mobile money.')
+      window.alert('You are repaying your current loan. Choose the amount you want to pay and continue using PesaPal.')
       setLoanRepaymentOpen(true)
       return
     }

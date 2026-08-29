@@ -1,7 +1,12 @@
+import base64
+import json
+import logging
 import uuid
 from decimal import Decimal
 from urllib.parse import quote
+from urllib.request import Request, urlopen
 
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import status, viewsets
@@ -16,6 +21,8 @@ from transactions.models import Transaction
 from .models import Savings
 from .payment_models import Payment
 from .payment_serializers import PaymentSerializer
+
+logger = logging.getLogger(__name__)
 
 
 class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
@@ -32,9 +39,67 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
 class PaymentStartView(APIView):
     permission_classes = [IsAuthenticated]
 
+    def _initiate_pesapal_payment(self, member, amount, purpose, phone_number=''):
+        consumer_key = getattr(settings, 'PESAPAL_CONSUMER_KEY', '')
+        consumer_secret = getattr(settings, 'PESAPAL_CONSUMER_SECRET', '')
+        api_base_url = getattr(settings, 'PESAPAL_API_BASE_URL', 'https://cybqa.pesapal.com/pesapalv3/api').rstrip('/')
+        if not consumer_key or not consumer_secret:
+            raise ValueError('PesaPal sandbox credentials are not configured.')
+
+        phone_value = (phone_number or member.phone_number or '').strip()
+        if not phone_value:
+            raise ValueError('A phone number is required to receive the PesaPal PIN prompt.')
+
+        token_request = Request(
+            f'{api_base_url}/Auth/RequestToken',
+            data=json.dumps({'grant_type': 'client_credentials'}).encode('utf-8'),
+            headers={
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Authorization': 'Basic ' + base64.b64encode(f'{consumer_key}:{consumer_secret}'.encode('utf-8')).decode('utf-8'),
+            },
+            method='POST',
+        )
+        token_payload = json.loads(urlopen(token_request, timeout=30).read().decode('utf-8') or '{}')
+        access_token = token_payload.get('access_token') or token_payload.get('token')
+        if not access_token:
+            raise ValueError('PesaPal token request did not return an access token.')
+
+        reference = f'YS-{timezone.now():%Y%m%d}-{uuid.uuid4().hex[:8].upper()}'
+        payment_payload = {
+            'id': reference,
+            'currency': 'UGX',
+            'amount': str(int(amount)),
+            'description': purpose.replace('_', ' ').title(),
+            'callback_url': f'{settings.FRONTEND_URL}/payment/complete',
+            'redirect_mode': 'TOP',
+            'billing_address': {
+                'email_address': member.email or 'member@example.com',
+                'phone_number': phone_value,
+                'country_code': getattr(settings, 'PESAPAL_COUNTRY_CODE', 'UG'),
+            },
+            'notification_id': str(uuid.uuid4()),
+        }
+        order_request = Request(
+            f'{api_base_url}/Transactions/SubmitOrderRequest',
+            data=json.dumps(payment_payload).encode('utf-8'),
+            headers={
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Authorization': f'Bearer {access_token}',
+            },
+            method='POST',
+        )
+        order_payload = json.loads(urlopen(order_request, timeout=30).read().decode('utf-8') or '{}')
+        redirect_url = order_payload.get('redirect_url') or order_payload.get('redirectUrl') or order_payload.get('url')
+        if not redirect_url:
+            raise ValueError('PesaPal order request did not return a redirect URL.')
+        return reference, redirect_url
+
     def post(self, request):
-        provider = request.data.get('provider')
+        provider = str(request.data.get('provider', '')).strip()
         purpose = request.data.get('purpose', Payment.Purpose.SAVINGS)
+        phone_number = str(request.data.get('phone_number', '')).strip()
         try:
             amount = Decimal(str(request.data.get('amount', '0')))
             member = request.user.member_profile
@@ -47,7 +112,31 @@ class PaymentStartView(APIView):
             return Response({'detail': 'Loan repayment amount must be greater than zero.'}, status=400)
         if purpose not in Payment.Purpose.values:
             return Response({'detail': 'Unsupported payment purpose.'}, status=400)
-        if amount <= 0 or provider not in Payment.Provider.values:
+        if amount <= 0:
+            return Response({'detail': 'Choose a supported provider and a positive amount.'}, status=400)
+
+        if provider.lower() == 'pesapal':
+            if not phone_number and not member.phone_number:
+                return Response({'detail': 'A phone number is required so the PIN prompt can be sent.'}, status=400)
+            try:
+                reference, redirect_url = self._initiate_pesapal_payment(member, amount, purpose, phone_number)
+            except Exception as exc:
+                logger.exception('PesaPal payment initiation failed for member %s', getattr(member, 'id', 'unknown'))
+                detail = str(exc).strip() or 'PesaPal payment could not be started right now.'
+                return Response({'detail': f'PesaPal payment could not be started: {detail}'}, status=503)
+            payment = Payment.objects.create(
+                member=member,
+                purpose=purpose,
+                provider=Payment.Provider.PESAPAL,
+                transaction_id=reference,
+                internal_reference=reference,
+                amount=amount,
+                sacco_number=phone_number or member.phone_number,
+            )
+            notify_member(member, 'Payment started', f'Your {purpose.replace("_", " ")} payment of UGX {amount:,.0f} has been started with PesaPal and is awaiting confirmation.')
+            return Response({'payment': PaymentSerializer(payment).data, 'redirect_url': redirect_url}, status=status.HTTP_201_CREATED)
+
+        if provider not in Payment.Provider.values:
             return Response({'detail': 'Choose a supported provider and a positive amount.'}, status=400)
 
         settings = SACCOSettings.current()

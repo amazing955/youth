@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import timedelta
+from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.core import mail
@@ -111,6 +112,32 @@ class ActivationFlowTests(TestCase):
             self.assertEqual(response.status_code, 400, f'Attempt {attempt + 1} should be handled as an invalid login.')
         response = client.post('/api/auth/login/', {'username': 'unknown', 'password': 'wrong-password'}, format='json', REMOTE_ADDR='198.51.100.42')
         self.assertEqual(response.status_code, 429)
+
+    @patch('savings.payment_views.urlopen')
+    def test_pesapal_payment_start_returns_redirect_url(self, mock_urlopen):
+        user = User.objects.create_user(username='pesapaluser', email='pesapal@example.com', password='Secret123')
+        Member.objects.create(
+            user=user,
+            full_name='Pesapal User',
+            email=user.email,
+            phone_number='+256700000010',
+            is_active=True,
+        )
+
+        token_response = Mock()
+        token_response.read.return_value = b'{"token":"sample-token"}'
+        redirect_response = Mock()
+        redirect_response.read.return_value = b'{"redirect_url":"https://pay.pesapal.com/checkout/abc123"}'
+        mock_urlopen.side_effect = [token_response, redirect_response]
+
+        client = APIClient()
+        client.force_authenticate(user=user)
+        response = client.post('/api/payments/start/', {'provider': 'PesaPal', 'amount': '20000', 'purpose': 'savings', 'phone_number': '+256700000010'}, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIn('https://pay.pesapal.com/checkout', response.data['redirect_url'])
+        self.assertEqual(response.data['payment']['provider'], 'PesaPal')
+        self.assertEqual(response.data['payment']['sacco_number'], '+256700000010')
 
     def test_loan_repayment_updates_outstanding_balance(self):
         member = Member.objects.create(

@@ -70,6 +70,11 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'true').lower() == 'true'
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'webmaster@localhost')
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+PESAPAL_API_BASE_URL = os.getenv('PESAPAL_API_BASE_URL', 'https://cybqa.pesapal.com/pesapalv3')
+PESAPAL_CONSUMER_KEY = os.getenv('PESAPAL_CONSUMER_KEY', 'beAOzV8fflaJBQq7PayNLjPCsWuFAvdz')
+PESAPAL_CONSUMER_SECRET = os.getenv('PESAPAL_CONSUMER_SECRET', 'jNBlukbmN7iQFcBnKJICSIg7hzs=')
+PESAPAL_STORE_URL = os.getenv('PESAPAL_STORE_URL', 'https://cybqa.pesapal.com/pesapalv3')
+PESAPAL_COUNTRY_CODE = os.getenv('PESAPAL_COUNTRY_CODE', 'UG')
 
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',

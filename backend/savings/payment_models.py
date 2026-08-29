@@ -7,6 +7,7 @@ class Payment(models.Model):
     class Provider(models.TextChoices):
         MTN = 'MTN', 'MTN Mobile Money'
         AIRTEL = 'Airtel', 'Airtel Money'
+        PESAPAL = 'PesaPal', 'PesaPal'
 
     class Purpose(models.TextChoices):
         SAVINGS = 'savings', 'Savings'
