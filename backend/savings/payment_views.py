@@ -3,7 +3,7 @@ import json
 import logging
 import uuid
 from decimal import Decimal
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -94,6 +94,9 @@ class PaymentStartView(APIView):
         redirect_url = order_payload.get('redirect_url') or order_payload.get('redirectUrl') or order_payload.get('url')
         if not redirect_url:
             raise ValueError('PesaPal order request did not return a redirect URL.')
+        parsed_redirect = urlparse(redirect_url)
+        if parsed_redirect.scheme != 'https' or not parsed_redirect.hostname or not parsed_redirect.hostname.endswith('pesapal.com'):
+            raise ValueError('PesaPal returned an unsafe redirect URL.')
         return reference, redirect_url
 
     def post(self, request):
@@ -214,11 +217,14 @@ class ReconcilePaymentView(APIView):
         route_name = str(request.data.get('purpose', request.data.get('route', request.data.get('payment_type', Payment.Purpose.SAVINGS)))).strip()
         try:
             amount = Decimal(str(request.data.get('amount', '0')))
-            member_id = request.data.get('member_id') or getattr(request.user.member_profile, 'id', None)
-            member = Member.objects.filter(id=member_id).select_related('user').first() if member_id else request.user.member_profile
+            if request.user.is_staff:
+                member_id = request.data.get('member_id')
+                member = Member.objects.filter(id=member_id).select_related('user').first() if member_id else None
+            else:
+                member = request.user.member_profile
         except (ValueError, TypeError, AttributeError, KeyError):
             return Response({'detail': 'Invalid payment payload.'}, status=400)
-        if provider not in Payment.Provider.values or not transaction_id or amount <= 0:
+        if not member or not amount.is_finite() or amount > Decimal('1000000000000') or provider not in Payment.Provider.values or not transaction_id or amount <= 0:
             return Response({'detail': 'Provider, transaction ID, and positive amount are required.'}, status=400)
         if route_name not in Payment.Purpose.values:
             route_name = Payment.Purpose.SAVINGS

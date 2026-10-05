@@ -25,7 +25,7 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
-import { applyForLoan, cancelLoan, changePassword, getDashboard, getLoanTerms, getLoans, getNotifications, getPaymentConfig, getProfile, getTransactions, markNotificationRead, reconcilePayment, startPayment, updateProfile, uploadProfilePicture } from './services/api'
+import { applyForLoan, cancelLoan, changePassword, createGoal, getDashboard, getGoals, getLoanTerms, getLoans, getNotifications, getPaymentConfig, getPendingWithdrawals, getProfile, getTransactions, markNotificationRead, openRealtimeSocket, reconcilePayment, respondToWithdrawal, sendSupportMessage, startPayment, updateGoal, updateProfile, uploadProfilePicture } from './services/api'
 import { useAuth } from './context/AuthContext'
 
 const quickActions = [
@@ -66,7 +66,8 @@ function AppHeader({ member, onProfile, notifications, onNotificationRead, onNot
   const firstName = member?.full_name?.split(' ')[0] || 'Member'
   const initials = member?.full_name?.split(' ').map((name) => name[0]).join('').slice(0, 2) || 'M'
   const [open, setOpen] = useState(false)
-  const unreadCount = notifications.filter((notification) => !notification.is_read).length
+  const unreadNotifications = notifications.filter((notification) => !notification.is_read)
+  const unreadCount = unreadNotifications.length
   function selectNotification(notification) {
     onNotificationSelect(notification)
     onNotificationRead(notification)
@@ -78,7 +79,7 @@ function AppHeader({ member, onProfile, notifications, onNotificationRead, onNot
         <p className="greeting">{timeGreeting()}, {firstName} <span aria-hidden="true">👋</span></p>
         <p className="welcome">Welcome back to your SACCO</p>
       </div>
-      <div className="header-actions"><button className={`whatsapp-button ${whatsappGroupLink ? '' : 'not-configured'}`} type="button" onClick={() => whatsappGroupLink ? window.open(whatsappGroupLink, '_blank', 'noopener,noreferrer') : window.alert('The SACCO WhatsApp group link has not been configured by the admin yet.')} aria-label="Join the SACCO WhatsApp group" title="Join SACCO WhatsApp group"><span>WA</span></button><div className="notification-wrap"><button className="icon-button notification-button" type="button" onClick={() => setOpen(!open)} aria-label="Open notifications"><Bell size={19} />{unreadCount > 0 && <span className="notification-count">{unreadCount > 9 ? '9+' : unreadCount}</span>}</button>{open && <div className="notification-panel"><div className="notification-panel-head"><strong>Notifications</strong><span>{unreadCount ? `${unreadCount} unread` : 'All caught up'}</span></div>{notifications.length ? notifications.slice(0, 6).map((notification) => <button className={`notification-item ${notification.is_read ? 'read' : ''}`} type="button" key={notification.id} onClick={() => selectNotification(notification)}><strong>{notification.title}</strong><span>{notification.message}</span><small>{new Date(notification.created_at).toLocaleString('en-UG')}</small></button>) : <p className="empty-state">No notifications yet.</p>}</div>}</div><button className="profile-button" type="button" onClick={onProfile} aria-label="Open profile settings">{member?.profile_picture ? <img src={member.profile_picture} alt="" /> : initials}</button></div>
+      <div className="header-actions"><button className={`whatsapp-button ${whatsappGroupLink ? '' : 'not-configured'}`} type="button" onClick={() => whatsappGroupLink ? window.open(whatsappGroupLink, '_blank', 'noopener,noreferrer') : window.alert('The SACCO WhatsApp group link has not been configured by the admin yet.')} aria-label="Join the SACCO WhatsApp group" title="Join SACCO WhatsApp group"><span>WA</span></button><div className="notification-wrap"><button className="icon-button notification-button" type="button" onClick={() => setOpen(!open)} aria-label="Open notifications"><Bell size={19} />{unreadCount > 0 && <span className="notification-count">{unreadCount > 9 ? '9+' : unreadCount}</span>}</button>{open && <div className="notification-panel"><div className="notification-panel-head"><strong>Notifications</strong><span>{unreadCount ? `${unreadCount} unread` : 'All caught up'}</span></div>{unreadNotifications.length ? unreadNotifications.slice(0, 6).map((notification) => <button className="notification-item" type="button" key={notification.id} onClick={() => selectNotification(notification)}><strong>{notification.title}</strong><span>{notification.message}</span><small>{new Date(notification.created_at).toLocaleString('en-UG')}</small></button>) : <p className="empty-state">No notifications yet.</p>}</div>}</div><button className="profile-button" type="button" onClick={onProfile} aria-label="Open profile settings">{member?.profile_picture ? <img src={member.profile_picture} alt="" /> : initials}</button></div>
     </header>
   )
 }
@@ -117,18 +118,19 @@ function TransactionRow({ transaction, detailed = false }) {
   return <div className={`transaction-row ${detailed ? 'detailed' : ''}`}><span className={`transaction-icon ${transaction.incoming ? 'incoming' : 'outgoing'}`}>{transaction.incoming ? <ArrowDownLeft size={17} /> : <ArrowUpRight size={17} />}</span><div className="transaction-info"><strong>{transaction.type}</strong><span>{transaction.date}</span></div><div className="transaction-amount"><strong className={transaction.incoming ? 'positive' : 'negative'}>{transaction.amount}</strong>{detailed ? <span className="transaction-status"><Check size={11} /> {transaction.status}</span> : <span>{transaction.status}</span>}</div></div>
 }
 
-function NoticeList({ selectedNotification, onClose }) {
+function NoticeList({ selectedNotification, onClose, onReply }) {
   const noticeRef = useRef(null)
   useEffect(() => {
     if (selectedNotification) noticeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [selectedNotification])
   if (!selectedNotification) return null
-  return <section className="notice-list-section selected-notification-section" ref={noticeRef}><div className="section-heading"><h2>Selected notification</h2><button className="see-all" type="button" onClick={onClose}>Close</button></div><article className="notice-item"><span className="notice-kind">{selectedNotification.kind}</span><strong>{selectedNotification.title}</strong><p>{selectedNotification.message}</p><small className="notification-full-date">{new Date(selectedNotification.created_at).toLocaleString('en-UG')}</small></article></section>
+  const isSupportReply = selectedNotification.kind === 'Support' || selectedNotification.title === 'Reply from SACCO admin'
+  return <section className="notice-list-section selected-notification-section" ref={noticeRef}><div className="section-heading"><h2>Selected notification</h2><button className="see-all" type="button" onClick={onClose}>Close</button></div><article className="notice-item"><span className="notice-kind">{selectedNotification.kind}</span><strong>{selectedNotification.title}</strong><p>{selectedNotification.message}</p><small className="notification-full-date">{new Date(selectedNotification.created_at).toLocaleString('en-UG')}</small>{isSupportReply && <button className="notification-reply-button" type="button" onClick={() => onReply(selectedNotification)}>Reply</button>}</article></section>
 }
 
-function HomeScreen({ dashboard, notifications, onNotificationRead, onNotificationSelect, selectedNotification, onCloseNotification, whatsappGroupLink, goals, onSetGoal, onEditGoal, onSave, onActivate, onViewAll, onViewStatement, onApplyLoan, pendingLoan, hasActiveLoan }) {
+function HomeScreen({ dashboard, notifications, onNotificationRead, onNotificationSelect, selectedNotification, onCloseNotification, onNotificationReply, whatsappGroupLink, goals, onSetGoal, onEditGoal, onSave, onActivate, onViewAll, onViewStatement, onApplyLoan, pendingLoan, hasActiveLoan }) {
   const reduceMotion = useReducedMotion()
-  return <motion.div className="screen home-screen" initial={reduceMotion ? false : { opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={reduceMotion ? undefined : { opacity: 0, x: -10 }} transition={{ duration: 0.3, ease }}><AppHeader member={dashboard.member} notifications={notifications} onNotificationRead={onNotificationRead} onNotificationSelect={onNotificationSelect} whatsappGroupLink={whatsappGroupLink} onProfile={() => {}} /><SummaryCard dashboard={dashboard} onSave={onSave} onActivate={onActivate} /><QuickActions onSave={onSave} onSetGoal={onSetGoal} onViewStatement={onViewStatement} onApplyLoan={onApplyLoan} pendingLoan={pendingLoan} hasActiveLoan={hasActiveLoan} /><GoalList goals={goals} onEdit={onEditGoal} /><RecentActivity transactions={dashboard.recent_transactions} onViewAll={onViewAll} /><NoticeList selectedNotification={selectedNotification} onClose={onCloseNotification} /><div className="security-note"><ShieldCheck size={16} /><span>Your savings are protected and secure</span></div></motion.div>
+  return <motion.div className="screen home-screen" initial={reduceMotion ? false : { opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={reduceMotion ? undefined : { opacity: 0, x: -10 }} transition={{ duration: 0.3, ease }}><AppHeader member={dashboard.member} notifications={notifications} onNotificationRead={onNotificationRead} onNotificationSelect={onNotificationSelect} whatsappGroupLink={whatsappGroupLink} onProfile={() => {}} /><SummaryCard dashboard={dashboard} onSave={onSave} onActivate={onActivate} /><QuickActions onSave={onSave} onSetGoal={onSetGoal} onViewStatement={onViewStatement} onApplyLoan={onApplyLoan} pendingLoan={pendingLoan} hasActiveLoan={hasActiveLoan} /><GoalList goals={goals} onEdit={onEditGoal} /><RecentActivity transactions={dashboard.recent_transactions} onViewAll={onViewAll} /><NoticeList selectedNotification={selectedNotification} onClose={onCloseNotification} onReply={onNotificationReply} /><div className="security-note"><ShieldCheck size={16} /><span>Your savings are protected and secure</span></div></motion.div>
 }
 
 function TransactionsScreen({ transactions, loading, error, report = false }) {
@@ -139,10 +141,33 @@ function TransactionsScreen({ transactions, loading, error, report = false }) {
   return <motion.div className="screen inner-screen" initial={reduceMotion ? false : { opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={reduceMotion ? undefined : { opacity: 0, x: -10 }} transition={{ duration: 0.3, ease }}><div className="page-title"><div><span className="eyebrow">{report ? 'Financial report' : 'Your activity'}</span><h1>{report ? 'Statement' : 'Transactions'}</h1></div><button className="icon-button" type="button" aria-label="Filter transactions"><Menu size={19} /></button></div>{loading ? <p className="empty-state">Loading transactions...</p> : error ? <p className="error-state">Unable to load your SACCO information. Please try again.</p> : <>{report && <div className="report-cards"><div><span>Money in</span><strong>{formatCurrency(deposits)}</strong></div><div><span>Money out</span><strong>{formatCurrency(spending)}</strong></div></div>}<div className="transaction-total"><span>{report ? 'Net movement' : 'Total activity'}</span><strong>{formatCurrency(total)}</strong><small>{report ? `${transactions.length} recorded transactions` : 'Net movement from your transactions'}</small></div><div className="full-transactions">{transactions.length ? transactions.map((transaction) => <TransactionRow transaction={normalizeTransaction(transaction)} detailed key={transaction.id} />) : <p className="empty-state">No transactions yet.</p>}</div></>}</motion.div>
 }
 
-function SettingsScreen({ member, onLogout, onProfile, onPassword }) {
+function HelpSupportScreen({ onBack, replyTo }) {
+  const faqs = [
+    ['How do I make a savings payment?', 'Open Save Money, choose PesaPal, enter your amount, and continue to complete payment securely.'],
+    ['How long does a payment take to appear?', 'Confirmed payments usually appear in your balance and transactions shortly after the provider confirms them.'],
+    ['How do I apply for a loan?', 'Use Apply for Loan from the home screen, enter an eligible amount, and submit it for admin review.'],
+    ['What should I do if a payment is missing?', 'Send us a message below with the amount, date, and payment reference so the admin can investigate it.'],
+  ]
+  const [openFaq, setOpenFaq] = useState(null)
+  const [message, setMessage] = useState('')
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
+  async function submit(event) {
+    event.preventDefault()
+    if (!message.trim()) return setError('Write a message before sending.')
+    setError(''); setStatus('Sending...')
+    try {
+      const result = await sendSupportMessage(message.trim())
+      setMessage(''); setStatus(result.message)
+    } catch { setStatus(''); setError('Unable to send your message. Please try again.') }
+  }
+  return <motion.div className="screen inner-screen" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.3, ease }}><div className="page-title"><button className="icon-button" type="button" onClick={onBack} aria-label="Back to settings"><ArrowDownLeft size={18} /></button><div><span className="eyebrow">Help center</span><h1>Help & Support</h1></div></div><section className="support-section"><div className="section-heading"><h2>Quick FAQs</h2><span>Common questions</span></div><div className="faq-list">{faqs.map(([question, answer], index) => <div className="faq-item" key={question}><button type="button" onClick={() => setOpenFaq(openFaq === index ? null : index)}><strong>{question}</strong><ChevronRight size={16} className={openFaq === index ? 'faq-open' : ''} /></button>{openFaq === index && <p>{answer}</p>}</div>)}</div></section><section className="support-section support-chat">{replyTo && <div className="support-reply-context"><span>Replying to SACCO admin</span><p>{replyTo.message}</p></div>}<div className="section-heading"><h2>Chat with the admin</h2><span>We are here to help</span></div><form onSubmit={submit}><textarea maxLength="2000" placeholder="Write your message..." value={message} onChange={(event) => setMessage(event.target.value)} /><div className="support-form-footer"><small>{message.length}/2000</small><button type="submit">Send message</button></div></form>{status && <p className="profile-success">{status}</p>}{error && <p className="profile-error">{error}</p>}</section></motion.div>
+}
+
+function SettingsScreen({ member, onLogout, onProfile, onPassword, onHelpSupport }) {
   const reduceMotion = useReducedMotion()
   const options = [[UserRound, 'Profile', member.full_name], [LockKeyhole, 'Security', 'Your account is secure'], [Bell, 'Notifications', 'On'], [ShieldCheck, 'Change PIN', 'Update your PIN'], [CircleHelp, 'Help & Support', 'We are here to help'], [LogOut, 'Logout', '']]
-  return <motion.div className="screen inner-screen" initial={reduceMotion ? false : { opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={reduceMotion ? undefined : { opacity: 0, x: -10 }} transition={{ duration: 0.3, ease }}><div className="page-title"><div><span className="eyebrow">Account</span><h1>Settings</h1></div></div><button className="settings-profile" type="button" onClick={onProfile}><span className="profile-large">{member.profile_picture ? <img src={member.profile_picture} alt="" /> : member.full_name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><span><strong>{member.full_name}</strong><small>Member ID: {member.id}</small></span><ChevronRight size={18} /></button><div className="settings-list">{options.map(([Icon, label, detail]) => <button className={`setting-row ${label === 'Logout' ? 'logout' : ''}`} type="button" key={label} onClick={label === 'Logout' ? onLogout : label === 'Profile' ? onProfile : label === 'Security' || label === 'Change PIN' ? onPassword : undefined}><span className="setting-icon"><Icon size={18} /></span><span><strong>{label}</strong>{detail && <small>{detail}</small>}</span><ChevronRight size={17} /></button>)}</div></motion.div>
+  return <motion.div className="screen inner-screen" initial={reduceMotion ? false : { opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={reduceMotion ? undefined : { opacity: 0, x: -10 }} transition={{ duration: 0.3, ease }}><div className="page-title"><div><span className="eyebrow">Account</span><h1>Settings</h1></div></div><button className="settings-profile" type="button" onClick={onProfile}><span className="profile-large">{member.profile_picture ? <img src={member.profile_picture} alt="" /> : member.full_name.split(' ').map((name) => name[0]).join('').slice(0, 2)}</span><span><strong>{member.full_name}</strong><small>Member ID: {member.id}</small></span><ChevronRight size={18} /></button><div className="settings-list">{options.map(([Icon, label, detail]) => <button className={`setting-row ${label === 'Logout' ? 'logout' : ''}`} type="button" key={label} onClick={label === 'Logout' ? onLogout : label === 'Profile' ? onProfile : label === 'Security' || label === 'Change PIN' ? onPassword : label === 'Help & Support' ? onHelpSupport : undefined}><span className="setting-icon"><Icon size={18} /></span><span><strong>{label}</strong>{detail && <small>{detail}</small>}</span><ChevronRight size={17} /></button>)}</div></motion.div>
 }
 
 function initials(name = 'Member') { return name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() }
@@ -175,18 +200,18 @@ function GoalSheet({ onClose, onGoalSaved, goal }) {
   const [amount, setAmount] = useState(goal?.amount?.toString() || '')
   const [error, setError] = useState('')
 
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault()
     const value = Number(amount)
     if (!name.trim() || !value || value <= 0) {
       setError('Enter an item name and a target amount greater than zero.')
       return
     }
-    onGoalSaved({ id: goal?.id || Date.now(), name: name.trim(), amount: value })
+    await onGoalSaved({ id: goal?.id, name: name.trim(), amount: value })
     onClose()
   }
 
-  return <motion.div className="sheet-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}><motion.form className="save-sheet goal-sheet" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ duration: 0.4, ease }} onClick={(event) => event.stopPropagation()} onSubmit={submit}><div className="sheet-handle" /><div className="sheet-header"><div><span className="eyebrow">Plan ahead</span><h2>{goal ? 'Edit financial goal' : 'Set a financial goal'}</h2><p className="sheet-subtitle">Choose an item and set the amount you want to reach.</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close financial goal form"><X size={19} /></button></div><label className="goal-field">Item name<input required placeholder="For example, school fees" value={name} onChange={(event) => setName(event.target.value)} /></label><label className="goal-field">Target amount<div className="amount-input"><span>UGX</span><input required type="number" min="1" step="1000" placeholder="Enter amount" value={amount} onChange={(event) => setAmount(event.target.value)} /></div></label>{error && <p className="profile-error">{error}</p>}<button className="button button-primary continue-button" type="submit">{goal ? 'Update goal' : 'Save goal'}</button><button className="cancel-button" type="button" onClick={onClose}>Cancel</button></motion.form></motion.div>
+  return <motion.div className="sheet-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}><motion.form className="save-sheet goal-sheet" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ duration: 0.4, ease }} onClick={(event) => event.stopPropagation()} onSubmit={submit}><div className="sheet-handle" /><div className="sheet-header"><div><span className="eyebrow">Plan ahead</span><h2>{goal ? 'Edit financial goal' : 'Set a financial goal'}</h2><p className="sheet-subtitle">Choose an item and set the amount you want to reach.</p></div><button className="icon-button" type="button" onClick={onClose} aria-label="Close financial goal form"><X size={19} /></button></div><label className="goal-field">Item name<input required placeholder="For example, school fees" value={name} onChange={(event) => setName(event.target.value)} /></label><label className="goal-field">Target amount<div className="amount-input"><span>UGX</span><input required type="number" min="1" step="1" placeholder="Enter amount" value={amount} onChange={(event) => setAmount(event.target.value)} /></div></label>{error && <p className="profile-error">{error}</p>}<button className="button button-primary continue-button" type="submit">{goal ? 'Update goal' : 'Save goal'}</button><button className="cancel-button" type="button" onClick={onClose}>Cancel</button></motion.form></motion.div>
 }
 
 function LoanSheet({ onClose, pendingLoan, onLoanCreated, onLoanCancelled }) {
@@ -209,9 +234,8 @@ function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false,
   const [selectedMethod, setSelectedMethod] = useState('PesaPal')
   const [amount, setAmount] = useState(activationMode ? '10000' : '')
   const [phoneNumber, setPhoneNumber] = useState('')
-  const [startError, setStartError] = useState('')
   const [fallbackStoreOpen, setFallbackStoreOpen] = useState(false)
-  const [savedPayment, setSavedPayment] = useState(() => {
+  const [savedPayment] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('sacco_saved_payment_details') || 'null')
     } catch {
@@ -231,7 +255,6 @@ function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false,
   }
 
   async function beginPayment() {
-    setStartError('')
     try {
       const provider = selectedMethod || 'PesaPal'
       const paymentAmount = activationMode ? '10000' : amount
@@ -241,6 +264,11 @@ function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false,
       if (!redirectTarget) {
         throw new Error('No payment redirect available.')
       }
+      const redirectUrl = new URL(redirectTarget, window.location.origin)
+      const allowedRedirect = redirectUrl.protocol === 'tel:' || (redirectUrl.protocol === 'https:' && redirectUrl.hostname.endsWith('pesapal.com'))
+      if (!allowedRedirect) {
+        throw new Error('Unsafe payment redirect.')
+      }
       sessionStorage.setItem('sacco_pending_payment', JSON.stringify({
         provider,
         purpose,
@@ -249,10 +277,9 @@ function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false,
         phone_number: phoneNumber,
         payment_id: result.payment?.id || null,
       }))
-      window.location.href = redirectTarget
+      window.location.href = redirectUrl.href
     } catch {
       setFallbackStoreOpen(true)
-      setStartError('Payment gateway is unavailable. Opening the PesaPal store inside the app.')
     }
   }
 
@@ -266,12 +293,11 @@ function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false,
               <div>
                 <span className="eyebrow">PesaPal store</span>
                 <h2>Continue payment</h2>
-                <p className="sheet-subtitle">The payment gateway is unavailable right now, so we opened the PesaPal store inside the app.</p>
+                <p className="sheet-subtitle">Complete your payment securely in the PesaPal store.</p>
               </div>
               <button className="icon-button" type="button" onClick={onClose} aria-label="Close PesaPal store"><X size={19} /></button>
             </div>
             <iframe title="PesaPal store" src={FALLBACK_PESAPAL_STORE_URL} className="fallback-store-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
-            {startError && <p className="profile-error">{startError}</p>}
             <button className="cancel-button" type="button" onClick={onClose}>Close</button>
           </>
         ) : (
@@ -377,7 +403,6 @@ function SaveSheet({ onClose, activationMode = false, loanRepaymentMode = false,
                 <button className="button button-primary continue-button" type="button" onClick={beginPayment} disabled={!selectedMethod || !phoneNumber || !amount || Number(amount) <= 0 || Boolean(amountError)}>
                   Continue
                 </button>
-                {startError && <p className="profile-error">{startError}</p>}
               </>
             )}
 
@@ -475,6 +500,30 @@ function BottomNav({ activeTab, setActiveTab }) {
   return <nav className="bottom-nav" aria-label="Main navigation">{tabs.map(([id, Icon, label]) => <button className={activeTab === id ? 'active' : ''} type="button" onClick={() => setActiveTab(id)} key={id}><span className="nav-icon"><Icon size={20} /></span><span>{label}</span></button>)}</nav>
 }
 
+function WithdrawalApprovalPrompt({ withdrawal, busy, error, onRespond }) {
+  const [secondsLeft, setSecondsLeft] = useState(0)
+
+  useEffect(() => {
+    function updateCountdown() {
+      setSecondsLeft(Math.max(0, Math.ceil((new Date(withdrawal.expires_at).getTime() - Date.now()) / 1000)))
+    }
+    updateCountdown()
+    const timer = window.setInterval(updateCountdown, 1000)
+    return () => window.clearInterval(timer)
+  }, [withdrawal.expires_at])
+
+  return <div className="withdrawal-overlay"><section className="withdrawal-prompt" role="dialog" aria-modal="true" aria-labelledby="withdrawal-title">
+    <span className="eyebrow">Your approval required</span>
+    <h2 id="withdrawal-title">Confirm withdrawal</h2>
+    <p>An admin requested to withdraw <strong>{formatCurrency(withdrawal.amount)}</strong> from your savings.</p>
+    <p className="withdrawal-countdown">This request expires in {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}.</p>
+    <p className="withdrawal-assurance">Your balance will not change unless you allow this withdrawal.</p>
+    {error && <p className="profile-error">{error}</p>}
+    <button className="button button-primary continue-button" type="button" disabled={busy || secondsLeft === 0} onClick={() => onRespond('approve')}>{busy ? 'Processing...' : 'Allow withdrawal'}</button>
+    <button className="cancel-button withdrawal-decline" type="button" disabled={busy} onClick={() => onRespond('cancel')}>Cancel withdrawal</button>
+  </section></div>
+}
+
 export function SaccoApp() {
   const { user, logout } = useAuth()
   const [activeTab, setActiveTab] = useState('home')
@@ -494,20 +543,22 @@ export function SaccoApp() {
   const [selectedNotification, setSelectedNotification] = useState(null)
   const [goalOpen, setGoalOpen] = useState(false)
   const [editingGoal, setEditingGoal] = useState(null)
-  const [goals, setGoals] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('sacco_financial_goals') || '[]') } catch { return [] }
-  })
+  const [goals, setGoals] = useState([])
   const [statementMode, setStatementMode] = useState(false)
+  const [pendingWithdrawal, setPendingWithdrawal] = useState(null)
+  const [withdrawalBusy, setWithdrawalBusy] = useState(false)
+  const [withdrawalError, setWithdrawalError] = useState('')
   useEffect(() => {
     let mounted = true
-    Promise.all([getDashboard(), getTransactions(), getLoans(), getNotifications(), getPaymentConfig()])
-      .then(([dashboardData, transactionData, loanData, notificationData, paymentConfig]) => {
+    Promise.all([getDashboard(), getTransactions(), getLoans(), getNotifications(), getPaymentConfig(), getGoals()])
+      .then(([dashboardData, transactionData, loanData, notificationData, paymentConfig, goalData]) => {
         if (!mounted) return
         setDashboard(dashboardData)
         setTransactions(transactionData.results || transactionData)
         setLoans(loanData.results || loanData)
         setNotifications(notificationData.notifications || [])
         setWhatsappGroupLink(paymentConfig.whatsapp_group_link || '')
+        setGoals(goalData)
       })
       .catch(() => {
         if (mounted) setTransactionError(true)
@@ -515,6 +566,59 @@ export function SaccoApp() {
       .finally(() => mounted && setLoading(false))
     return () => { mounted = false }
   }, [user])
+  useEffect(() => {
+    let active = true
+    let reconnectTimer
+    let socket
+    const refresh = () => Promise.all([getDashboard(), getTransactions(), getLoans(), getNotifications(), getGoals()]).then(([dashboardData, transactionData, loanData, notificationData, goalData]) => {
+      if (!active) return
+      setDashboard(dashboardData); setTransactions(transactionData.results || transactionData); setLoans(loanData.results || loanData); setNotifications(notificationData.notifications || []); setGoals(goalData)
+    }).catch(() => {})
+    const connect = () => {
+      if (!active) return
+      socket = openRealtimeSocket(() => refresh())
+      socket.onclose = () => { if (active) reconnectTimer = window.setTimeout(connect, 5000) }
+    }
+    connect()
+    return () => { active = false; window.clearTimeout(reconnectTimer); socket?.close() }
+  }, [user])
+
+  useEffect(() => {
+    let active = true
+    async function refreshWithdrawalRequests() {
+      try {
+        const requests = await getPendingWithdrawals()
+        if (active) setPendingWithdrawal(requests[0] || null)
+      } catch {
+        if (active) setPendingWithdrawal(null)
+      }
+    }
+    refreshWithdrawalRequests()
+    const interval = window.setInterval(refreshWithdrawalRequests, 5000)
+    return () => {
+      active = false
+      window.clearInterval(interval)
+    }
+  }, [user])
+
+  async function handleWithdrawalResponse(action) {
+    if (!pendingWithdrawal) return
+    setWithdrawalBusy(true)
+    setWithdrawalError('')
+    try {
+      await respondToWithdrawal(pendingWithdrawal.id, action)
+      setPendingWithdrawal(null)
+      if (action === 'approve') {
+        const [dashboardData, transactionData] = await Promise.all([getDashboard(), getTransactions()])
+        setDashboard(dashboardData)
+        setTransactions(transactionData.results || transactionData)
+      }
+    } catch {
+      setWithdrawalError('Unable to record your response. Please try again before the request expires.')
+    } finally {
+      setWithdrawalBusy(false)
+    }
+  }
 
   async function handleNotificationRead(notification) {
     if (!notification.is_read) {
@@ -523,12 +627,9 @@ export function SaccoApp() {
     }
   }
 
-  function handleGoalSaved(goal) {
-    setGoals((items) => {
-      const updated = editingGoal ? items.map((item) => item.id === goal.id ? goal : item) : [...items, goal]
-      localStorage.setItem('sacco_financial_goals', JSON.stringify(updated))
-      return updated
-    })
+  async function handleGoalSaved(goal) {
+    const savedGoal = goal.id ? await updateGoal(goal.id, goal) : await createGoal(goal)
+    setGoals((items) => editingGoal ? items.map((item) => item.id === savedGoal.id ? savedGoal : item) : [...items, savedGoal])
     setEditingGoal(null)
   }
 
@@ -537,7 +638,8 @@ export function SaccoApp() {
     setGoalOpen(true)
   }
 
-  const settingsScreen = dashboard && (settingsView === 'profile' ? <ProfileScreen onBack={() => setSettingsView('settings')} /> : <SettingsScreen member={dashboard.member} onLogout={logout} onProfile={() => setSettingsView('profile')} onPassword={() => setPasswordOpen(true)} />)
+  const [supportReply, setSupportReply] = useState(null)
+  const settingsScreen = dashboard && (settingsView === 'profile' ? <ProfileScreen onBack={() => setSettingsView('settings')} /> : settingsView === 'help' ? <HelpSupportScreen replyTo={supportReply} onBack={() => { setSupportReply(null); setSettingsView('settings') }} /> : <SettingsScreen member={dashboard.member} onLogout={logout} onProfile={() => setSettingsView('profile')} onPassword={() => setPasswordOpen(true)} onHelpSupport={() => setSettingsView('help')} />)
   const pendingLoan = loans.find((loan) => loan.status === 'Pending')
   const activeLoan = loans.find((loan) => loan.status === 'Approved' || loan.status === 'Active')
   const hasActiveLoan = Boolean(activeLoan)
@@ -555,6 +657,12 @@ export function SaccoApp() {
     setLoanOpen(true)
   }
 
-  const screens = dashboard ? { home: <HomeScreen dashboard={dashboard} notifications={notifications} onNotificationRead={handleNotificationRead} onNotificationSelect={setSelectedNotification} selectedNotification={selectedNotification} onCloseNotification={() => setSelectedNotification(null)} whatsappGroupLink={whatsappGroupLink} goals={goals} onSetGoal={() => openGoalSheet()} onEditGoal={openGoalSheet} onSave={() => setSheetOpen(true)} onActivate={handleAccountActivation} onApplyLoan={handleLoanAction} pendingLoan={pendingLoan} hasActiveLoan={hasActiveLoan} onViewAll={() => { setStatementMode(false); setActiveTab('transactions') }} onViewStatement={() => { setStatementMode(true); setActiveTab('transactions') }} />, transactions: <TransactionsScreen transactions={transactions} loading={loading} error={transactionError} report={statementMode} />, settings: settingsScreen } : null
-  return <div className="app-frame"><div className="app-status"><span>● ● ▰</span></div><main className="app-content"><AnimatePresence mode="wait">{loading && !dashboard ? <p className="app-loading">Loading your SACCO information...</p> : transactionError && !dashboard ? <p className="app-error">Unable to load your SACCO information. Please try again.</p> : screens?.[activeTab]}</AnimatePresence></main><BottomNav activeTab={activeTab} setActiveTab={(tab) => { setActiveTab(tab); if (tab === 'settings') setSettingsView('settings'); if (tab === 'transactions') setStatementMode(false) }} /><AnimatePresence>{sheetOpen && <SaveSheet onClose={() => setSheetOpen(false)} />}{activationOpen && <SaveSheet activationMode onClose={() => setActivationOpen(false)} />}{loanRepaymentOpen && <SaveSheet loanRepaymentMode maxRepaymentAmount={Number(activeLoan?.outstanding_balance || 0)} onClose={() => setLoanRepaymentOpen(false)} />}{goalOpen && <GoalSheet goal={editingGoal} onClose={() => { setGoalOpen(false); setEditingGoal(null) }} onGoalSaved={handleGoalSaved} />}{passwordOpen && <PasswordSheet onClose={() => setPasswordOpen(false)} />}{loanOpen && <LoanSheet pendingLoan={pendingLoan} onLoanCreated={(loan) => setLoans((items) => [...items, loan])} onLoanCancelled={() => setLoans((items) => items.filter((loan) => loan.id !== pendingLoan?.id))} onClose={() => setLoanOpen(false)} />}</AnimatePresence></div>
+  function handleNotificationReply(notification) {
+    setSupportReply(notification)
+    setSelectedNotification(null)
+    setSettingsView('help')
+    setActiveTab('settings')
+  }
+  const screens = dashboard ? { home: <HomeScreen dashboard={dashboard} notifications={notifications} onNotificationRead={handleNotificationRead} onNotificationSelect={setSelectedNotification} selectedNotification={selectedNotification} onCloseNotification={() => setSelectedNotification(null)} onNotificationReply={handleNotificationReply} whatsappGroupLink={whatsappGroupLink} goals={goals} onSetGoal={() => openGoalSheet()} onEditGoal={openGoalSheet} onSave={() => setSheetOpen(true)} onActivate={handleAccountActivation} onApplyLoan={handleLoanAction} pendingLoan={pendingLoan} hasActiveLoan={hasActiveLoan} onViewAll={() => { setStatementMode(false); setActiveTab('transactions') }} onViewStatement={() => { setStatementMode(true); setActiveTab('transactions') }} />, transactions: <TransactionsScreen transactions={transactions} loading={loading} error={transactionError} report={statementMode} />, settings: settingsScreen } : null
+  return <div className="app-frame"><div className="app-status"><span>● ● ▰</span></div><main className="app-content"><AnimatePresence mode="wait">{loading && !dashboard ? <p className="app-loading">Loading your SACCO information...</p> : transactionError && !dashboard ? <p className="app-error">Unable to load your SACCO information. Please try again.</p> : screens?.[activeTab]}</AnimatePresence></main><BottomNav activeTab={activeTab} setActiveTab={(tab) => { setActiveTab(tab); if (tab === 'settings') setSettingsView('settings'); if (tab === 'transactions') setStatementMode(false) }} /><AnimatePresence>{sheetOpen && <SaveSheet onClose={() => setSheetOpen(false)} />}{activationOpen && <SaveSheet activationMode onClose={() => setActivationOpen(false)} />}{loanRepaymentOpen && <SaveSheet loanRepaymentMode maxRepaymentAmount={Number(activeLoan?.outstanding_balance || 0)} onClose={() => setLoanRepaymentOpen(false)} />}{goalOpen && <GoalSheet goal={editingGoal} onClose={() => { setGoalOpen(false); setEditingGoal(null) }} onGoalSaved={handleGoalSaved} />}{passwordOpen && <PasswordSheet onClose={() => setPasswordOpen(false)} />}{loanOpen && <LoanSheet pendingLoan={pendingLoan} onLoanCreated={(loan) => setLoans((items) => [...items, loan])} onLoanCancelled={() => setLoans((items) => items.filter((loan) => loan.id !== pendingLoan?.id))} onClose={() => setLoanOpen(false)} />}{pendingWithdrawal && <WithdrawalApprovalPrompt withdrawal={pendingWithdrawal} busy={withdrawalBusy} error={withdrawalError} onRespond={handleWithdrawalResponse} />}</AnimatePresence></div>
 }

@@ -1,4 +1,16 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'
+const API_URL = import.meta.env.VITE_API_URL || '/api'
+const WS_URL = import.meta.env.VITE_API_URL
+  ? API_URL.replace(/^http/, 'ws').replace(/\/api$/, '')
+  : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
+
+export function openRealtimeSocket(onMessage) {
+  const token = localStorage.getItem('sacco_auth_token')
+  const socket = new WebSocket(`${WS_URL}/ws/updates/?token=${encodeURIComponent(token || '')}`)
+  socket.onmessage = (event) => {
+    try { onMessage(JSON.parse(event.data)) } catch { /* Ignore malformed events. */ }
+  }
+  return socket
+}
 
 async function request(path, options = {}) {
   const token = localStorage.getItem('sacco_auth_token')
@@ -23,6 +35,9 @@ export function getDashboard() {
 export function getTransactions() {
   return request('/transactions/')
 }
+export function getGoals() { return request('/goals/') }
+export function createGoal(payload) { return request('/goals/', { method: 'POST', body: JSON.stringify(payload) }) }
+export function updateGoal(goalId, payload) { return request(`/goals/${goalId}/`, { method: 'PATCH', body: JSON.stringify(payload) }) }
 
 export function getLoanTerms() {
   return request('/loans/terms/')
@@ -47,6 +62,7 @@ export function createSavings(payload) {
 export function loginRequest(payload) {
   return request('/auth/login/', { method: 'POST', body: JSON.stringify(payload) })
 }
+export function verifyAdminOTP(payload) { return request('/auth/admin/verify-otp/', { method: 'POST', body: JSON.stringify(payload) }) }
 
 export function registerRequest(payload) {
   return request('/auth/register/', { method: 'POST', body: JSON.stringify(payload) })
@@ -69,6 +85,11 @@ export function uploadProfilePicture(file) {
 export function changePassword(payload) {
   return request('/auth/change-password/', { method: 'POST', body: JSON.stringify(payload) })
 }
+export function sendSupportMessage(message) { return request('/support/messages/', { method: 'POST', body: JSON.stringify({ message }) }) }
+export function sendAdminSupportReply(userId, message) { return request('/admin/support/reply/', { method: 'POST', body: JSON.stringify({ user_id: userId, message }) }) }
+export function getAdminIssues() { return request('/admin/support/issues/') }
+export function createAdminIssue(userId, description) { return request('/admin/support/issues/', { method: 'POST', body: JSON.stringify({ user_id: userId, description }) }) }
+export function resolveAdminIssue(issueId, report) { return request(`/admin/support/issues/${issueId}/resolve/`, { method: 'POST', body: JSON.stringify({ report }) }) }
 
 export function resetPassword(payload) { return request('/auth/reset-password/', { method: 'POST', body: JSON.stringify(payload) }) }
 export function adminPasswordReset(memberId) { return request(`/admin/members/${memberId}/password-reset/`, { method: 'POST', body: JSON.stringify({}) }) }
@@ -98,6 +119,11 @@ export function getAdminMembers(search = '') {
 }
 
 export function getAdminMember(memberId) { return request(`/admin/members/${memberId}/`) }
+export function addAdminMemberDeposit(memberId, amount) { return request(`/admin/members/${memberId}/deposit/`, { method: 'POST', body: JSON.stringify({ amount }) }) }
+export function withdrawAdminMember(memberId, amount) { return request(`/admin/members/${memberId}/withdraw/`, { method: 'POST', body: JSON.stringify({ amount }) }) }
+export function reverseAdminMemberDeposit(memberId, reference) { return request(`/admin/members/${memberId}/deposit/${encodeURIComponent(reference)}/reverse/`, { method: 'POST', body: JSON.stringify({}) }) }
+export function getPendingWithdrawals() { return request('/withdrawals/pending/') }
+export function respondToWithdrawal(requestId, action) { return request(`/withdrawals/${requestId}/respond/`, { method: 'POST', body: JSON.stringify({ action }) }) }
 
 export function getAdminLoans() {
   return request('/loans/')
@@ -110,10 +136,14 @@ export function adminPaymentAction(paymentId, action, reason = '') {
 export function adminLoanAction(loanId, action, reason = '') {
   return request(`/admin/loans/${loanId}/action/`, { method: 'POST', body: JSON.stringify({ action, reason }) })
 }
+export function adminLoanRepayment(loanId, amount) { return request(`/admin/loans/${loanId}/repayment/`, { method: 'POST', body: JSON.stringify({ amount }) }) }
+export function adminLoanForcePay(loanId) { return request(`/admin/loans/${loanId}/force-pay/`, { method: 'POST', body: JSON.stringify({}) }) }
 
 export function getNotices() { return request('/notices/') }
 export function getNotifications() { return request('/notifications/') }
 export function markNotificationRead(notificationId) { return request(`/notifications/${notificationId}/read/`, { method: 'PATCH', body: JSON.stringify({}) }) }
+export function registerPushDevice(token, platform) { return request('/push-devices/', { method: 'POST', body: JSON.stringify({ token, platform }) }) }
+export function unregisterPushDevice(token) { return request('/push-devices/', { method: 'DELETE', body: JSON.stringify({ token }) }) }
 export function getAdminNotices() { return request('/admin/notices/') }
 export function createAdminNotice(payload) { return request('/admin/notices/', { method: 'POST', body: JSON.stringify(payload) }) }
 export function generateLoanNotices(kind) { return request('/admin/loan-notices/generate/', { method: 'POST', body: JSON.stringify({ kind }) }) }

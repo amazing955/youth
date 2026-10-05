@@ -9,14 +9,14 @@ from transactions.models import Transaction
 
 
 class Command(BaseCommand):
-    help = 'Create sample Youth Saving SACCO data.'
+    help = 'Create sample Coins and Dreams SACCO data.'
 
     def handle(self, *args, **options):
         user_model = get_user_model()
         user, _ = user_model.objects.get_or_create(username='john', defaults={'first_name': 'John', 'last_name': 'Doe', 'email': 'john.doe@example.com'})
-        if not user.has_usable_password():
-            user.set_password('ChangeMe123!')
-            user.save(update_fields=['password'])
+        user.set_password('ChangeMe123!')
+        user.is_active = True
+        user.save(update_fields=['password', 'is_active'])
         member, _ = Member.objects.update_or_create(
             id=UUID('00000000-0000-0000-0000-000000000001'),
             defaults={
@@ -37,7 +37,7 @@ class Command(BaseCommand):
             Savings(member=member, amount=Decimal('500000'), payment_method=Savings.PaymentMethod.MTN, transaction_reference='SAV-003'),
         ])
         from accounts.models import SACCOSettings
-        SACCOSettings.objects.get_or_create(id=1, defaults={'sacco_name': 'Youth Saving', 'mtn_number': '0700000000', 'airtel_number': '0750000000'})
+        SACCOSettings.objects.get_or_create(id=1, defaults={'sacco_name': 'Coins and Dreams', 'mtn_number': '0700000000', 'airtel_number': '0750000000'})
         Loan.objects.create(member=member, loan_amount=Decimal('1500000'), amount_paid=Decimal('650000'), status=Loan.Status.ACTIVE)
         Transaction.objects.bulk_create([
             Transaction(member=member, transaction_type=Transaction.TransactionType.SAVINGS, amount=Decimal('100000'), payment_method='MTN Mobile Money', description='Savings Deposit', reference='TXN-001'),

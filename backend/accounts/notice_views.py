@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from loans.models import Loan
-from .models import AuditLog, Member, Notice, Notification, SACCOSettings
+from .models import AuditLog, Member, Notice, Notification, PushDevice, SACCOSettings
 from .notice_serializers import NoticeSerializer
 from .notification_serializers import NotificationSerializer
 from .notification_utils import notify_member, notify_members
@@ -35,6 +35,23 @@ class NotificationView(APIView):
         notification.is_read = True
         notification.save(update_fields=['is_read'])
         return Response(NotificationSerializer(notification).data)
+
+
+class PushDeviceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        token = str(request.data.get('token', '')).strip()
+        platform = str(request.data.get('platform', '')).strip()[:20]
+        if not token or len(token) > 512:
+            return Response({'detail': 'A valid device token is required.'}, status=400)
+        device, _ = PushDevice.objects.update_or_create(token=token, defaults={'user': request.user, 'platform': platform})
+        return Response({'id': device.id, 'platform': device.platform}, status=201)
+
+    def delete(self, request):
+        token = str(request.data.get('token', '')).strip()
+        PushDevice.objects.filter(user=request.user, token=token).delete()
+        return Response(status=204)
 
 
 class AdminNoticeView(APIView):

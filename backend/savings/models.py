@@ -6,6 +6,8 @@ class Savings(models.Model):
     class PaymentMethod(models.TextChoices):
         MTN = 'MTN Mobile Money', 'MTN Mobile Money'
         AIRTEL = 'Airtel Money', 'Airtel Money'
+        MANUAL = 'Manual deposit', 'Manual deposit'
+        ADMIN_WITHDRAWAL = 'Admin withdrawal', 'Admin withdrawal'
 
     member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name='savings')
     amount = models.DecimalField(max_digits=14, decimal_places=2)

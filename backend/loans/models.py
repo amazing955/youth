@@ -24,8 +24,12 @@ class Loan(models.Model):
     rejection_reason = models.TextField(blank=True)
 
     def save(self, *args, **kwargs):
-        self.outstanding_balance = max(self.loan_amount - self.amount_paid, Decimal('0'))
+        self.outstanding_balance = self.calculated_outstanding_balance()
         super().save(*args, **kwargs)
+
+    def calculated_outstanding_balance(self):
+        interest = (self.loan_amount * self.interest_rate / Decimal('100')).quantize(Decimal('0.01'))
+        return max(self.loan_amount + interest - self.amount_paid, Decimal('0'))
 
     class Meta:
         ordering = ['-created_at']

@@ -2,6 +2,14 @@
 
 ## Setup
 
+For deployments, set `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=false`, `DJANGO_ALLOWED_HOSTS`, and the payment provider credentials in the environment. Provider credentials are intentionally not stored in source control.
+
+Local `runserver` automatically uses development mode. Set `DJANGO_SECRET_KEY` explicitly when running the backend outside local development.
+
+## Push notifications
+
+Push notifications use Firebase Cloud Messaging. For Android, add the Firebase project's `google-services.json` to `android/app/`, then rebuild/sync the Capacitor app. Set `FIREBASE_SERVICE_ACCOUNT_JSON` to the path of the Firebase Admin SDK service-account JSON on the backend host. Never commit either credential file. Authenticated app sessions register their device token at `/api/push-devices/`; calls to `notify_member` deliver the stored notification through FCM as well as the in-app and email channels.
+
 ```bash
 cd backend
 python -m venv .venv

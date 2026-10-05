@@ -32,7 +32,7 @@ class Migration(migrations.Migration):
             name='SACCOSettings',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('sacco_name', models.CharField(default='Youth Savings', max_length=150)),
+                ('sacco_name', models.CharField(default='Coins and Dreams', max_length=150)),
                 ('mtn_number', models.CharField(max_length=30)),
                 ('airtel_number', models.CharField(max_length=30)),
                 ('mtn_ussd_template', models.CharField(default='*165*1*{SACCO_NUMBER}*{AMOUNT}#', max_length=255)),

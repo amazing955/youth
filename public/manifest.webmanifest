@@ -1,7 +1,7 @@
 {
-  "name": "Youth Savings",
-  "short_name": "Youth Savings",
-  "description": "Manage your Youth Savings account.",
+  "name": "Coins and Dreams",
+  "short_name": "Coins and Dreams",
+  "description": "Manage your Coins and Dreams account.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

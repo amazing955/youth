@@ -1,4 +1,5 @@
 import uuid
+from django.utils import timezone
 
 from django.conf import settings
 from django.db import models
@@ -28,7 +29,7 @@ class Member(models.Model):
 
 
 class SACCOSettings(models.Model):
-    sacco_name = models.CharField(max_length=150, default='Youth Savings')
+    sacco_name = models.CharField(max_length=150, default='Coins and Dreams')
     loan_interest_rate = models.DecimalField(max_digits=5, decimal_places=2, default=10)
     mtn_number = models.CharField(max_length=30)
     airtel_number = models.CharField(max_length=30)
@@ -84,6 +85,79 @@ class Notification(models.Model):
     kind = models.CharField(max_length=30, default='General')
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class WithdrawalRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'Pending', 'Pending'
+        APPROVED = 'Approved', 'Approved'
+        CANCELLED = 'Cancelled', 'Cancelled'
+        EXPIRED = 'Expired', 'Expired'
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name='withdrawal_requests')
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='withdrawal_requests')
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    expires_at = models.DateTimeField()
+    responded_at = models.DateTimeField(null=True, blank=True)
+    transaction_reference = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class PushDevice(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='push_devices')
+    token = models.CharField(max_length=512, unique=True)
+    platform = models.CharField(max_length=20, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+
+class SupportIssue(models.Model):
+    class Status(models.TextChoices):
+        OPEN = 'Open', 'Open'
+        RESOLVED = 'Resolved', 'Resolved'
+
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name='support_issues')
+    title = models.CharField(max_length=180, default='Support issue')
+    description = models.TextField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    report = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='resolved_support_issues')
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class AdminLoginOTP(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='admin_login_otps')
+    code_hash = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    def is_valid(self):
+        return self.verified_at is None and self.attempts < 5 and timezone.now() < self.expires_at
+
+
+class FinancialGoal(models.Model):
+    member = models.ForeignKey(Member, on_delete=models.CASCADE, related_name='financial_goals')
+    name = models.CharField(max_length=150)
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    achieved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['-created_at']

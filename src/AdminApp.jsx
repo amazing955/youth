@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import {
+  Bell,
   CircleAlert,
   Landmark,
   LogOut,
   Megaphone,
+  Plus,
   Settings,
   Users,
   WalletCards,
@@ -11,6 +13,8 @@ import {
 import { useNavigate } from "react-router-dom";
 import {
   adminLoanAction,
+  adminLoanForcePay,
+  adminLoanRepayment,
   adminPaymentAction,
   createAdminNotice,
   generateLoanNotices,
@@ -18,8 +22,13 @@ import {
   getAdminDashboard,
   getAdminLoans,
   getAdminMembers,
+  getAdminIssues,
   getAdminPayments,
   getAdminSettings,
+  sendAdminSupportReply,
+  openRealtimeSocket,
+  createAdminIssue,
+  resolveAdminIssue,
   updateAdminSettings,
 } from "./services/api";
 import AdminMemberDirectory from "./AdminMemberDirectory";
@@ -36,16 +45,21 @@ function timeGreeting() {
   return "Good evening";
 }
 
-function AdminToolsContent() {
+function isOverdueLoan(loan) {
+  const createdAt = new Date(loan.created_at)
+  const dueDate = new Date(createdAt)
+  dueDate.setFullYear(dueDate.getFullYear() + 1)
+  return loan.status !== "Pending" && loan.status !== "Rejected" && Number(loan.outstanding_balance) > 0 && new Date() >= dueDate
+}
+
+function AdminToolsContent({ audit }) {
   const [settings, setSettings] = useState(null);
-  const [audit, setAudit] = useState([]);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
-    Promise.all([getAdminSettings(), getAdminAudit()])
-      .then(([settingsData, auditData]) => {
+    getAdminSettings()
+      .then((settingsData) => {
         setSettings(settingsData);
-        setAudit(auditData);
       })
       .catch(() => setError("Unable to load settings and audit history."));
   }, []);
@@ -65,7 +79,7 @@ function AdminToolsContent() {
     return <p className="admin-empty">Loading system controls...</p>;
   return (
     <>
-      <section className="admin-section">
+      <section className="admin-section admin-settings-section">
         <div className="admin-section-head">
           <div>
             <span className="eyebrow">System controls</span>
@@ -153,7 +167,7 @@ function AdminToolsContent() {
           </form>
         )}
       </section>
-      <section className="admin-section">
+      <section className="admin-section admin-audit-section">
         <div className="admin-section-head">
           <div>
             <span className="eyebrow">Accountability</span>
@@ -183,7 +197,7 @@ function AdminToolsContent() {
   );
 }
 
-function AdminTools() {
+function AdminTools({ openIssueCount, audit }) {
   const [settings, setSettings] = useState(null);
   const [status, setStatus] = useState("");
   useEffect(() => {
@@ -203,6 +217,8 @@ function AdminTools() {
         ["payments", "Payments"],
         ["members", "Members"],
         ["loans", "Loans"],
+        ["notifications", "Notifications"],
+        ["my-issues", `My Issues (${openIssueCount})`],
         ["notices", "Notices"],
         ["settings", "Settings"],
         ["audit", "Audit log"],
@@ -232,7 +248,7 @@ function AdminTools() {
     buttons[0].classList.add("active");
     main.classList.add("admin-view-overview");
     return () => sidebar.remove();
-  }, []);
+  }, [openIssueCount]);
   async function saveWhatsApp(event) {
     event.preventDefault();
     setStatus("Saving...");
@@ -246,7 +262,7 @@ function AdminTools() {
   }
   return (
     <>
-      <AdminToolsContent />
+      <AdminToolsContent audit={audit} />
       <section className="admin-section">
         <div className="admin-section-head">
           <div>
@@ -290,27 +306,65 @@ export default function AdminApp() {
   const [stats, setStats] = useState(null);
   const [payments, setPayments] = useState([]);
   const [loans, setLoans] = useState([]);
+  const [adminAudit, setAdminAudit] = useState([]);
+  const [issues, setIssues] = useState([]);
   const [members, setMembers] = useState([]);
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState({ title: "", message: "" });
   const [error, setError] = useState("");
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [selectedNotification, setSelectedNotification] = useState(null);
+  const [priorityLoanId, setPriorityLoanId] = useState(null);
+  const [readNotificationIds, setReadNotificationIds] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("admin_read_notifications") || "[]")); } catch { return new Set(); }
+  });
+  const [reply, setReply] = useState("");
+  const [replyStatus, setReplyStatus] = useState("");
   useEffect(() => {
     Promise.all([
       getAdminDashboard(),
       getAdminPayments(),
       getAdminMembers(),
       getAdminLoans(),
+      getAdminAudit(),
+      getAdminIssues(),
     ])
-      .then(([dashboard, paymentData, memberData, loanData]) => {
+      .then(([dashboard, paymentData, memberData, loanData, auditData, issueData]) => {
         setStats(dashboard);
         setPayments(paymentData.results || paymentData);
         setMembers(memberData);
         setLoans(loanData.results || loanData);
+        setAdminAudit(auditData);
+        setIssues(issueData);
       })
       .catch(() =>
         setError("Unable to load admin information. Please try again."),
       );
   }, []);
+  useEffect(() => {
+    const refreshAudit = () => getAdminAudit().then(setAdminAudit).catch(() => {});
+    const interval = window.setInterval(refreshAudit, 30000);
+    return () => window.clearInterval(interval);
+  }, []);
+  useEffect(() => {
+    let active = true;
+    let reconnectTimer;
+    let socket;
+    const refresh = () => Promise.all([getAdminDashboard(), getAdminPayments(), getAdminMembers(), getAdminLoans(), getAdminAudit(), getAdminIssues()]).then(([dashboard, paymentData, memberData, loanData, auditData, issueData]) => {
+      if (!active) return;
+      setStats(dashboard); setPayments(paymentData.results || paymentData); setMembers(memberData); setLoans(loanData.results || loanData); setAdminAudit(auditData); setIssues(issueData);
+    }).catch(() => {});
+    const connect = () => {
+      if (!active) return;
+      socket = openRealtimeSocket(() => refresh());
+      socket.onclose = () => { if (active) reconnectTimer = window.setTimeout(connect, 5000); };
+    };
+    connect();
+    return () => { active = false; window.clearTimeout(reconnectTimer); socket?.close(); };
+  }, []);
+  useEffect(() => {
+    localStorage.setItem("admin_read_notifications", JSON.stringify([...readNotificationIds]));
+  }, [readNotificationIds]);
   function signOut() {
     logout();
     navigate("/", { replace: true });
@@ -345,6 +399,29 @@ export default function AdminApp() {
       );
     } catch {
       setError("Unable to update this loan.");
+    }
+  }
+  async function recordLoanRepayment(loan) {
+    const amount = window.prompt(`Enter the amount cleared for ${loan.member_name} (UGX):`)
+    if (amount === null || !amount.trim()) return
+    if (!/^\d+(\.\d{1,2})?$/.test(amount.trim()) || Number(amount) <= 0 || Number(amount) > Number(loan.outstanding_balance)) {
+      setError("Enter a valid amount that does not exceed the outstanding loan balance.")
+      return
+    }
+    try {
+      const updated = await adminLoanRepayment(loan.id, amount.trim())
+      setLoans((items) => items.map((item) => item.id === loan.id ? { ...item, ...updated } : item))
+    } catch {
+      setError("Unable to record the loan repayment.")
+    }
+  }
+  async function forcePayLoan(loan) {
+    if (!window.confirm(`Force pay ${loan.member_name}'s full loan balance of ${money(loan.outstanding_balance)} from their savings?`)) return
+    try {
+      const updated = await adminLoanForcePay(loan.id)
+      setLoans((items) => items.map((item) => item.id === loan.id ? { ...item, ...updated } : item))
+    } catch {
+      setError("Unable to force pay this loan. Check that the member has enough savings.")
     }
   }
   async function publishNotice(event) {
@@ -405,6 +482,90 @@ export default function AdminApp() {
     ["Failed payments", stats?.payments?.failed, CircleAlert],
     ["Duplicate payments", stats?.payments?.duplicate, CircleAlert],
   ];
+  const adminNotifications = [
+    ...loans.filter(isOverdueLoan).map((loan) => ({
+      id: `overdue-${loan.id}`,
+      title: "Loan overdue for force payment",
+      detail: `${loan.member_name || "Member"} · ${money(loan.outstanding_balance)}`,
+      loanId: loan.id,
+      createdAt: loan.created_at,
+    })),
+    ...adminAudit.filter((log) => log.action === "loan_application_submitted" || log.action === "support_message_received" || log.action === "member_withdrawal_approved").map((log) => ({
+      id: `audit-${log.id}`,
+      title: log.action === "loan_application_submitted" ? "New loan request" : log.action === "support_message_received" ? "New support message" : "Withdrawal approved by member",
+      detail: log.description,
+      support: log.action === "support_message_received",
+      userId: log.action === "support_message_received" ? log.object_id : null,
+      loanId: log.action === "loan_application_submitted" ? log.object_id : null,
+      createdAt: log.created_at,
+    })),
+    ...payments.filter((payment) => payment.status === "Pending").map((payment) => ({
+      id: `payment-${payment.id}`,
+      title: "Payment awaiting review",
+      detail: `${payment.internal_reference} · ${money(payment.amount)}`,
+      createdAt: payment.created_at,
+    })),
+    ...loans.filter((loan) => loan.status === "Pending").map((loan) => ({
+      id: `loan-${loan.id}`,
+      title: "Loan application awaiting review",
+      detail: `${loan.member_name || "Member"} · ${money(loan.loan_amount)}`,
+      loanId: loan.id,
+      createdAt: loan.created_at,
+    })),
+  ];
+  const allAdminNotifications = [...adminNotifications].sort((first, second) => new Date(second.createdAt || 0) - new Date(first.createdAt || 0));
+  const unreadNotifications = adminNotifications.filter((item) => !readNotificationIds.has(item.id));
+  function openNotification(item) {
+    markNotificationRead(item.id);
+    if (item.loanId) {
+      setPriorityLoanId(item.loanId);
+      setNotificationsOpen(false);
+      setSelectedNotification(null);
+      document.querySelector('.admin-sidebar nav button[data-section="loans"]')?.click();
+      return;
+    }
+    setSelectedNotification(item);
+    setReplyStatus("");
+  }
+  function markNotificationRead(notificationId) {
+    setReadNotificationIds((ids) => new Set(ids).add(notificationId));
+  }
+  async function submitReply(event) {
+    event.preventDefault();
+    if (!reply.trim() || !selectedNotification?.userId) return;
+    setReplyStatus("Sending...");
+    try {
+      const result = await sendAdminSupportReply(selectedNotification.userId, reply.trim());
+      setReply("");
+      setReplyStatus(result.message);
+    } catch {
+      setReplyStatus("Unable to send the reply.");
+    }
+  }
+  async function createIssue() {
+    if (!selectedNotification?.userId) return;
+    try {
+      await createAdminIssue(selectedNotification.userId, selectedNotification.detail);
+      setIssues(await getAdminIssues());
+      setReplyStatus("Issue added to My Issues.");
+    } catch {
+      setReplyStatus("Unable to create the issue.");
+    }
+  }
+  async function resolveIssue(issue) {
+    if (issue.status === "Resolved") {
+      window.alert(issue.report || "No resolution report was recorded.");
+      return;
+    }
+    const report = window.prompt("Write a simple resolution report:");
+    if (!report?.trim()) return;
+    try {
+      const updated = await resolveAdminIssue(issue.id, report.trim());
+      setIssues((items) => items.map((item) => item.id === issue.id ? { ...item, ...updated } : item));
+    } catch {
+      setError("Unable to resolve this issue.");
+    }
+  }
   return (
     <div className="admin-shell">
       <header className="admin-header">
@@ -413,13 +574,22 @@ export default function AdminApp() {
             <Landmark size={20} />
           </span>
           <div>
-            <strong>Youth Savings</strong>
+            <strong>Coins and Dreams</strong>
             <small>Admin module</small>
           </div>
         </div>
-        <button className="admin-logout" type="button" onClick={signOut}>
-          <LogOut size={16} /> Logout
-        </button>
+        <div className="admin-header-actions">
+          <div className="admin-notification-wrap">
+            <button className="admin-icon-button admin-notification-button" type="button" aria-label="Open notifications" title="Notifications" onClick={() => setNotificationsOpen((open) => !open)}>
+              <Bell size={18} />
+              {unreadNotifications.length > 0 && <span className="admin-notification-count">{unreadNotifications.length > 9 ? "9+" : unreadNotifications.length}</span>}
+            </button>
+            {notificationsOpen && <div className="admin-notification-panel"><div className="admin-notification-panel-head"><strong>Notifications</strong><span>{unreadNotifications.length ? `${unreadNotifications.length} unread` : "All caught up"}</span></div>{unreadNotifications.length ? unreadNotifications.map((item) => <button className="admin-notification-item" type="button" key={item.id} onClick={() => openNotification(item)}><strong>{item.title}</strong><small>{item.detail}</small></button>) : <p className="admin-empty">No pending reviews.</p>}{selectedNotification && <div className="admin-notification-detail"><strong>{selectedNotification.title}</strong><p>{selectedNotification.detail}</p>{selectedNotification.support && <><div className="admin-notification-detail-actions"><button type="button" onClick={() => setReplyStatus("Reply below")}>Reply</button><button type="button" onClick={createIssue}>Issue</button></div><form onSubmit={submitReply}><textarea maxLength="2000" placeholder="Write a reply..." value={reply} onChange={(event) => setReply(event.target.value)} /><button type="submit">Send reply</button></form></>}{replyStatus && <small>{replyStatus}</small>}</div>}</div>}
+          </div>
+          <button className="admin-logout" type="button" onClick={signOut}>
+            <LogOut size={16} /> Logout
+          </button>
+        </div>
       </header>
       <main className="admin-main">
         <div className="admin-welcome">
@@ -444,7 +614,15 @@ export default function AdminApp() {
             </article>
           ))}
         </section>
-        <section className="admin-section">
+        <section className="admin-section admin-notifications-section">
+          <div className="admin-section-head"><div><span className="eyebrow">Activity center</span><h2>Notifications</h2></div><span className="admin-section-description">{allAdminNotifications.length} total</span></div>
+          <div className="admin-notifications-list">{allAdminNotifications.filter((item) => !readNotificationIds.has(item.id)).length ? allAdminNotifications.filter((item) => !readNotificationIds.has(item.id)).map((item) => <div className="admin-notification-list-item" role="button" tabIndex="0" key={item.id} onClick={() => openNotification(item)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") openNotification(item); }}><span className="admin-notification-list-icon"><Bell size={15} /></span><span><strong>{item.title}<em className="admin-new-badge">New</em></strong><small>{item.detail}</small></span><time>{item.createdAt ? new Date(item.createdAt).toLocaleString("en-UG") : ""}</time><button type="button" className="admin-read-button" onClick={(event) => { event.stopPropagation(); markNotificationRead(item.id); }}>Read</button></div>) : <p className="admin-empty">No notifications yet.</p>}</div>
+        </section>
+        <section className="admin-section admin-issues-section">
+          <div className="admin-section-head"><div><span className="eyebrow">Support follow-up</span><h2>My Issues</h2></div><span className="admin-section-description">{issues.filter((issue) => issue.status !== "Resolved").length} open</span></div>
+          <div className="admin-issues-list">{issues.length ? issues.map((issue) => <div className={`admin-issue-row ${issue.status === "Resolved" ? "resolved" : ""}`} key={issue.id}><div><strong>{issue.member_name}</strong><small>{issue.description}</small>{issue.status === "Resolved" && <p>{issue.report}</p>}</div><button type="button" onClick={() => resolveIssue(issue)}>{issue.status === "Resolved" ? "Review" : "Resolve"}</button></div>) : <p className="admin-empty">No issues yet.</p>}</div>
+        </section>
+        <section className="admin-section admin-payments-section">
           <div className="admin-section-head">
             <div>
               <span className="eyebrow">Reconciliation queue</span>
@@ -511,25 +689,27 @@ export default function AdminApp() {
           setSearch={setSearch}
           setError={setError}
         />
-        <section className="admin-section">
+        <section className="admin-section admin-loans-section">
           <div className="admin-section-head">
             <div>
               <span className="eyebrow">Credit portfolio</span>
               <h2>Loans</h2>
             </div>
             <div className="notice-actions">
-              <button type="button" onClick={() => sendLoanNotice("Reminder")}>
+              <button type="button" className="reminder-action" onClick={() => sendLoanNotice("Reminder")}>
+                <Bell size={14} />
                 Send reminders
               </button>
-              <button type="button" onClick={() => sendLoanNotice("Demand")}>
+              <button type="button" className="demand-action" onClick={() => sendLoanNotice("Demand")}>
+                <CircleAlert size={14} />
                 Send demands
               </button>
             </div>
           </div>
           <div className="admin-member-list">
             {loans.length ? (
-              loans.map((loan) => (
-                <div className="admin-member" key={loan.id}>
+              [...loans].sort((first, second) => (String(first.id) === String(priorityLoanId) ? -1 : 0) + (String(second.id) === String(priorityLoanId) ? 1 : 0)).map((loan) => (
+                <div className={`admin-member ${isOverdueLoan(loan) ? "loan-overdue" : ""}`} key={loan.id}>
                   <span>LN</span>
                   <div>
                     <strong>
@@ -555,6 +735,10 @@ export default function AdminApp() {
                       </button>
                     </div>
                   )}
+                  {loan.status !== "Pending" && loan.status !== "Rejected" && Number(loan.outstanding_balance) > 0 && (
+                    <button type="button" className="loan-repayment-button" aria-label={`Record repayment for ${loan.member_name}`} title="Record cleared amount" onClick={() => recordLoanRepayment(loan)}><Plus size={15} /></button>
+                  )}
+                  {isOverdueLoan(loan) && <button type="button" className="loan-force-pay-button" onClick={() => forcePayLoan(loan)}>Force pay</button>}
                 </div>
               ))
             ) : (
@@ -562,7 +746,7 @@ export default function AdminApp() {
             )}
           </div>
         </section>
-        <section className="admin-section notice-composer">
+        <section className="admin-section admin-notices-section notice-composer">
           <div className="admin-section-head">
             <div>
               <span className="eyebrow">Member communications</span>
@@ -606,7 +790,7 @@ export default function AdminApp() {
             </div>
           </form>
         </section>
-        <AdminTools />
+        <AdminTools openIssueCount={issues.filter((issue) => issue.status !== "Resolved").length} audit={adminAudit} />
       </main>
     </div>
   );

@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { StrictMode } from 'react'
+import { useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import './index.css'
@@ -8,6 +9,7 @@ import { LoginPage, RegisterPage, ResetPasswordPage, WelcomePage } from './AuthP
 import { PaymentCompletePage, SaccoApp } from './App.jsx'
 import AdminApp from './AdminApp.jsx'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
+import { setupPushNotifications } from './services/pushNotifications.js'
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'))
@@ -24,10 +26,22 @@ function AdminRoute() {
   return user?.role === 'admin' ? <AdminApp /> : <Navigate to="/app" replace />
 }
 
+function PushNotificationBootstrap() {
+  const { user } = useAuth()
+  useEffect(() => {
+    if (!user) return undefined
+    let cleanup
+    setupPushNotifications().then((removeListeners) => { cleanup = removeListeners }).catch(() => {})
+    return () => { cleanup?.() }
+  }, [user])
+  return null
+}
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <AuthProvider>
       <BrowserRouter>
+        <PushNotificationBootstrap />
         <Routes>
           <Route path="/" element={<WelcomePage />} />
           <Route path="/login" element={<LoginPage />} />

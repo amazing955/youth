@@ -1,6 +1,7 @@
 from django.contrib.auth import password_validation
 from django.core.files.images import get_image_dimensions
 from rest_framework import serializers
+from PIL import Image
 
 from .models import Member
 
@@ -21,11 +22,17 @@ class ProfileSerializer(serializers.ModelSerializer):
     def validate_profile_image(self, image):
         if image.size > 5 * 1024 * 1024:
             raise serializers.ValidationError('Profile pictures must be 5 MB or smaller.')
+        if getattr(image, 'content_type', '') not in {'image/jpeg', 'image/png', 'image/webp'}:
+            raise serializers.ValidationError('Upload a valid JPG, PNG, or WEBP image.')
         try:
             width, height = get_image_dimensions(image)
+            image.seek(0)
+            with Image.open(image) as uploaded_image:
+                uploaded_image.verify()
+            image.seek(0)
         except Exception as error:
             raise serializers.ValidationError('Upload a valid JPG, PNG, or WEBP image.') from error
-        if not width or not height:
+        if not width or not height or width > 4096 or height > 4096:
             raise serializers.ValidationError('Upload a valid image file.')
         return image
 

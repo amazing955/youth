@@ -1,6 +1,6 @@
 {
   "appId": "org.kihandecou.youthsavings",
-  "appName": "Youth Savings",
+  "appName": "Coins and Dreams",
   "webDir": "dist",
   "server": {
     "androidScheme": "https"

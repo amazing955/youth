@@ -30,6 +30,7 @@ class DashboardView(APIView):
 
     def _dashboard_response(self, member):
         savings_total = Savings.objects.filter(member=member).aggregate(total=Sum('amount'))['total'] or Decimal('0')
-        loan_total = Loan.objects.filter(member=member, status__in=[Loan.Status.PENDING, Loan.Status.APPROVED, Loan.Status.ACTIVE]).aggregate(total=Sum('outstanding_balance'))['total'] or Decimal('0')
+        active_loans = Loan.objects.filter(member=member, status__in=[Loan.Status.PENDING, Loan.Status.APPROVED, Loan.Status.ACTIVE])
+        loan_total = sum((loan.calculated_outstanding_balance() for loan in active_loans), Decimal('0'))
         recent = Transaction.objects.filter(member=member)[:5]
         return Response({'member': MemberSerializer(member).data, 'current_savings': savings_total, 'loan_balance': loan_total, 'recent_transactions': TransactionSerializer(recent, many=True).data})

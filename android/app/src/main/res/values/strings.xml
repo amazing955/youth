@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Youth Savings</string>
-    <string name="title_activity_main">Youth Savings</string>
+    <string name="app_name">Coins and Dreams</string>
+    <string name="title_activity_main">Coins and Dreams</string>
     <string name="package_name">org.kihandecou.youthsavings</string>
     <string name="custom_url_scheme">org.kihandecou.youthsavings</string>
 </resources>

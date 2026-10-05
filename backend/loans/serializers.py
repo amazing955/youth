@@ -3,13 +3,17 @@ from decimal import Decimal
 from django.db.models import Sum
 from rest_framework import serializers
 
-from accounts.models import SACCOSettings
+from accounts.models import AuditLog, SACCOSettings
 from savings.models import Savings
 from .models import Loan
 
 
 class LoanSerializer(serializers.ModelSerializer):
     member_name = serializers.CharField(source='member.full_name', read_only=True)
+    outstanding_balance = serializers.SerializerMethodField()
+
+    def get_outstanding_balance(self, loan):
+        return loan.calculated_outstanding_balance()
 
     def validate_loan_amount(self, value):
         member = self.context['request'].user.member_profile
@@ -27,7 +31,15 @@ class LoanSerializer(serializers.ModelSerializer):
         validated_data['member'] = member
         validated_data['status'] = Loan.Status.PENDING
         validated_data['interest_rate'] = SACCOSettings.current().loan_interest_rate
-        return super().create(validated_data)
+        loan = super().create(validated_data)
+        AuditLog.objects.create(
+            user=request.user,
+            action='loan_application_submitted',
+            object_type='Loan',
+            object_id=str(loan.id),
+            description=f'{member.full_name} submitted a loan application for UGX {loan.loan_amount:,.2f}.',
+        )
+        return loan
 
     class Meta:
         model = Loan
