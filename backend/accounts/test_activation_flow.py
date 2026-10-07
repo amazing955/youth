@@ -124,6 +124,18 @@ class ActivationFlowTests(TestCase):
         serializer = LoginSerializer(data={'username': 'newmember', 'password': 'Secret123'})
         self.assertTrue(serializer.is_valid())
 
+    def test_admin_login_uses_standard_password_flow_without_otp(self):
+        admin = User.objects.create_superuser(username='adminotpfree', email='adminotp@example.com', password='AdminSecret123')
+
+        client = APIClient()
+        response = client.post('/api/auth/login/', {'username': 'adminotpfree', 'password': 'AdminSecret123'}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('otp_required', response.data)
+        self.assertIn('token', response.data)
+        self.assertEqual(response.data['user']['role'], 'admin')
+        self.assertEqual(response.data['user']['username'], admin.username)
+
     def test_seed_data_resets_sample_login_password(self):
         call_command('seed_data')
         client = APIClient()

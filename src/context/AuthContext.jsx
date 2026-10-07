@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useMemo, useState } from 'react'
-import { loginRequest, registerRequest, verifyAdminOTP } from '../services/api'
+import { loginRequest, registerRequest } from '../services/api'
 
 const AuthContext = createContext(null)
 const TOKEN_KEY = 'sacco_auth_token'
@@ -14,21 +14,6 @@ export function AuthProvider({ children }) {
     setLoading(true)
     try {
       const result = await loginRequest(credentials)
-      if (!result.otp_required) {
-        localStorage.setItem(TOKEN_KEY, result.token)
-        localStorage.setItem(USER_KEY, JSON.stringify(result.user))
-        setUser(result.user)
-      }
-      return result
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function verifyAdminLogin(challengeId, code) {
-    setLoading(true)
-    try {
-      const result = await verifyAdminOTP({ challenge_id: challengeId, code })
       localStorage.setItem(TOKEN_KEY, result.token)
       localStorage.setItem(USER_KEY, JSON.stringify(result.user))
       setUser(result.user)
@@ -49,7 +34,7 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
-  const value = useMemo(() => ({ user, loading, isAuthenticated: Boolean(user && localStorage.getItem(TOKEN_KEY)), login, verifyAdminLogin, register, logout }), [user, loading])
+  const value = useMemo(() => ({ user, loading, isAuthenticated: Boolean(user && localStorage.getItem(TOKEN_KEY)), login, register, logout }), [user, loading])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

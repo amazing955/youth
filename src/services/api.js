@@ -62,7 +62,6 @@ export function createSavings(payload) {
 export function loginRequest(payload) {
   return request('/auth/login/', { method: 'POST', body: JSON.stringify(payload) })
 }
-export function verifyAdminOTP(payload) { return request('/auth/admin/verify-otp/', { method: 'POST', body: JSON.stringify(payload) }) }
 
 export function registerRequest(payload) {
   return request('/auth/register/', { method: 'POST', body: JSON.stringify(payload) })

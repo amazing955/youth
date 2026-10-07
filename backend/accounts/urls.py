@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from .views import DashboardView, MemberViewSet
-from .auth_views import AdminOTPVerifyView, AdminPasswordResetView, LoginView, RegisterView, ResetPasswordView
+from .auth_views import AdminPasswordResetView, LoginView, RegisterView, ResetPasswordView
 from .admin_views import AdminAuditView, AdminDashboardView, AdminLoanActionView, AdminLoanForcePayView, AdminLoanRepaymentView, AdminMemberDepositView, AdminMemberDepositReverseView, AdminMemberDetailView, AdminMemberWithdrawalView, AdminMembersView, MemberWithdrawalRequestView, PaymentConfigView
 from .profile_views import AdminSupportIssueResolveView, AdminSupportIssueView, AdminSupportReplyView, ChangePasswordView, ProfilePictureView, ProfileView, SupportMessageView
 from .goal_views import GoalDetailView, GoalView
@@ -14,7 +14,6 @@ urlpatterns = [
     path('', include(router.urls)),
     path('dashboard/me/', DashboardView.as_view(), name='dashboard-me'),
     path('auth/login/', LoginView.as_view(), name='auth-login'),
-    path('auth/admin/verify-otp/', AdminOTPVerifyView.as_view(), name='admin-verify-otp'),
     path('auth/register/', RegisterView.as_view(), name='auth-register'),
     path('auth/reset-password/', ResetPasswordView.as_view(), name='auth-reset-password'),
     path('auth/change-password/', ChangePasswordView.as_view(), name='change-password'),

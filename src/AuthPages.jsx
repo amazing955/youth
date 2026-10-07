@@ -17,21 +17,20 @@ export function WelcomePage() {
 function PiggyIcon() { return <span className="piggy-icon">YS</span> }
 
 export function LoginPage() {
-  const { login, verifyAdminLogin, loading } = useAuth()
+  const { login, loading } = useAuth()
   const navigate = useNavigate()
   const [form, setForm] = useState({ username: '', password: '' })
   const [error, setError] = useState('')
-  const [challengeId, setChallengeId] = useState(null)
-  const [otp, setOtp] = useState('')
   async function submit(event) {
     event.preventDefault(); setError('')
     try {
-      const result = challengeId ? await verifyAdminLogin(challengeId, otp) : await login(form)
-      if (result.otp_required) { setChallengeId(result.challenge_id); setError(''); return }
+      const result = await login(form)
       navigate(result.user.role === 'admin' ? '/admin' : '/app')
-    } catch { setError(challengeId ? 'Invalid or expired OTP.' : 'Invalid username or password.') }
+    } catch {
+      setError('Invalid username or password.')
+    }
   }
-  return <AuthShell eyebrow={challengeId ? 'Security check' : 'Welcome back'} title={challengeId ? 'Enter admin OTP' : 'Login'} subtitle={challengeId ? 'The code was sent to your admin email and printed in the backend terminal.' : 'Access your Coins and Dreams account.'}><form className="auth-form" onSubmit={submit}>{error && <p className="form-error">{error}</p>}{challengeId ? <label>One-time password<input required autoFocus inputMode="numeric" pattern="[0-9]{6}" maxLength="6" value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ''))} /></label> : <><label>Username<input required value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label><label>Password<input required type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label></>}<button className="auth-primary" disabled={loading} type="submit">{loading ? (challengeId ? 'Verifying...' : 'Logging in...') : (challengeId ? 'Verify OTP' : 'Login')} <ArrowRight size={18} /></button></form></AuthShell>
+  return <AuthShell eyebrow="Welcome back" title="Login" subtitle="Access your Coins and Dreams account."><form className="auth-form" onSubmit={submit}>{error && <p className="form-error">{error}</p>}<label>Username<input required value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label><label>Password<input required type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label><button className="auth-primary" disabled={loading} type="submit">{loading ? 'Logging in...' : 'Login'} <ArrowRight size={18} /></button></form></AuthShell>
 }
 
 export function ResetPasswordPage() {
